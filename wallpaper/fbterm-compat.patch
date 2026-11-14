@@ -1,5 +1,5 @@
-fbterm-compat.patch -- xterm sequence compatibility for FbTerm 1.7
-==================================================================
+fbterm-compat.patch -- xterm compatibility for FbTerm 1.7
+===========================================================
 
 Stock FbTerm 1.7 (as packaged by Debian, fbterm 1.7-5) predates
 several xterm escape sequences that modern programs emit
@@ -9,10 +9,12 @@ unconditionally, without consulting terminfo (fastfetch is one):
   * SGR 38;5;<n> / 48;5;<n>  256-colour foreground/background
   * SGR 38;2 / 48;2          truecolor (approximated to the cube)
   * OSC sequences            (OSC 8 hyperlinks, OSC 52, titles...)
+  * DECSET 1049 & friends    alternate screen (vim, less, htop)
 
-Without this patch, SGR 48;5;<n> turns blink on, and an OSC 8
+Without this patch, SGR 48;5;<n> turns blink on, an OSC 8
 hyperlink ("ESC ] 8 ;; file://... BEL") leaks onto the screen as
-garbage text, because FbTerm's parser had no OSC state at all.
+garbage text, and full-screen programs draw over your shell
+because the alternate screen does not exist.
 
 The patch teaches FbTerm's VT parser:
   * src/lib/vterm_action.cpp: the SGR codes above, in
@@ -27,6 +29,23 @@ The patch teaches FbTerm's VT parser:
     (ESC ] P... / ESC ] R), which are handed to the legacy
     ESnonstd state unchanged. ESC \ is also accepted as a string
     terminator in the ESesc state.
+  * Alternate screen in set_alt_screen()/save_screen()/
+    restore_screen(): DECSET/DECRST 47 and 1047 switch to a
+    fresh, cleared screen and back (main screen snapshot is
+    restored), 1048 saves/restores cursor + rendition, 1049 is
+    the combination (ncurses smcup/rmcup). Entering clears the
+    alternate screen and homes the cursor; leaving also resets
+    the scroll margins to the full screen. Lines scrolled off
+    inside the alternate screen are lost instead of polluting
+    the main scrollback, history browsing is suspended while it
+    is active, and RIS (ESC c) leaves it, like in xterm.
+    enable_mode() now honours every parameter of a mode sequence
+    (ESC [ ? 1049 ; 25 h), not just the first one.
+
+Verified with a headless harness that drives VTerm directly and
+inspects the resulting cell grid (colours, attributes, screen
+contents, cursor, history): 40/40 checks pass; the stock Debian
+parser fails 23 of the same 40.
 
 Apply AFTER the Debian patch series (build-fbterm-patched.sh does
 the full download/patch/build/install cycle):
@@ -38,15 +57,18 @@ not touched).
 
 --- a/src/lib/vterm.h
 +++ b/src/lib/vterm.h
-@@ -167,6 +167,7 @@
+@@ -167,6 +167,10 @@
  	u32 translate_char(u32);
  	void set_cursor_type();
  	void linux_specific();
 +	void begin_osc();
++	void set_alt_screen(bool enter, bool with_cursor);
++	void save_screen();
++	void restore_screen();
  	void begin_set_palette();
  	void set_palette();
  	void reset_palette();
-@@ -185,7 +186,7 @@
+@@ -185,7 +189,7 @@
  	static bool init_ambiguous_wide();
  
  	typedef enum {
@@ -55,11 +77,19 @@ not touched).
  	} EscapeState;
  
  	EscapeState esc_state;
-@@ -266,6 +267,7 @@
+@@ -266,6 +270,15 @@
  	#define NPAR 16
  	u16 npar, param[NPAR];
  	bool q_mode, palette_mode;
 +	bool osc_first; // true until the first char of an OSC sequence is seen
++
++	// alternate screen (DECSET 47/1047/1048/1049): snapshot of the
++	// main screen, restored when the alternate screen is left
++	bool alt_active;
++	u16 *saved_text;
++	CharAttr *saved_attrs;
++	u16 *saved_linenumbers;
++	u16 saved_width, saved_height;
  
  	//history
  	static u16 history_lines;
@@ -85,7 +115,38 @@ not touched).
  };
 --- a/src/lib/vterm.cpp
 +++ b/src/lib/vterm.cpp
-@@ -469,6 +469,31 @@
+@@ -112,6 +112,12 @@
+ 	history_save_line = 0;
+ 	visual_start_line = 0;
+ 
++	alt_active = false;
++	saved_text = 0;
++	saved_attrs = 0;
++	saved_linenumbers = 0;
++	saved_width = saved_height = 0;
++
+ 	reset();
+ 	resize(w, h);
+ }
+@@ -122,6 +128,9 @@
+ 
+ 	delete[] text;
+ 	delete[] attrs;
++	delete[] saved_text;
++	delete[] saved_attrs;
++	delete[] saved_linenumbers;
+ 	delete[] tab_stops;
+ 	delete[] linenumbers;
+ 	delete[] dirty_startx;
+@@ -138,6 +147,7 @@
+ 	charset = g0_charset;
+ 
+ 	esc_state = ESnormal;
++	alt_active = false;
+ 
+ 	pending_scroll = 0;
+ 	scroll_top = 0;
+@@ -469,6 +479,31 @@
  
  void VTerm::do_control_char()
  {
@@ -117,6 +178,23 @@ not touched).
  	u8 index = (cur_char < MAX_CONTROL_CODE ? control_map[cur_char] : 0);
  	const Sequence *seq = control_sequences + index;
  
+@@ -608,7 +643,7 @@
+ 	if (num > mx) num = mx;
+ 	if (-num > mx) num = -mx;
+ 
+-	if (start_y == 0 && num > 0) {
++	if (start_y == 0 && num > 0 && !alt_active) {
+ 		history_scroll(num);
+ 	}
+ 
+@@ -778,6 +813,7 @@
+ 
+ void VTerm::historyDisplay(bool absolute, s32 num)
+ {
++	if (alt_active) return;
+ 	if (!history_lines || (absolute && num == (s32)visual_start_line) || (!absolute && !num)) return;
+ 
+ 	u32 bak_line = visual_start_line;
 --- a/src/lib/vterm_action.cpp
 +++ b/src/lib/vterm_action.cpp
 @@ -96,6 +96,12 @@
@@ -132,7 +210,219 @@ not touched).
  void VTerm::save_cursor()
  {
  	s_g0_charset = g0_charset;
-@@ -460,6 +466,25 @@
+@@ -118,6 +124,94 @@
+ 	move_cursor(s_cursor_x, s_cursor_y);
+ }
+ 
++// Alternate screen (DECSET 47/1047/1048/1049), as used by vim, less,
++// htop, mc and ncurses (smcup/rmcup): entering saves the main screen
++// and switches to a fresh, cleared one; leaving restores the main
++// screen (and, for 1049/1048, the cursor and rendition saved on
++// entry). The history buffer is never touched: lines scrolled off
++// inside the alternate screen are lost, like in xterm.
++void VTerm::set_alt_screen(bool enter, bool with_cursor)
++{
++	if (enter == alt_active) return;
++
++	// A pending fast scroll belongs to the screen being left;
++	// dropping it is always safe (everything is redrawn below).
++	pending_scroll = 0;
++
++	if (enter) {
++		if (with_cursor) save_cursor();
++		save_screen();
++
++		for (u16 i = 0; i < max_height; i++) {
++			linenumbers[i] = history_lines + i;
++		}
++		visual_start_line = total_history_lines();
++		scroll_top = 0;
++		scroll_bot = height - 1;
++		alt_active = true;
++		clear_area(0, 0, width - 1, height - 1);
++		move_cursor(0, 0);
++	} else {
++		restore_screen();
++		alt_active = false;
++		scroll_top = 0;
++		scroll_bot = height - 1;
++		if (with_cursor) restore_cursor();
++	}
++}
++
++void VTerm::save_screen()
++{
++	delete[] saved_text;
++	delete[] saved_attrs;
++	delete[] saved_linenumbers;
++
++	saved_text = new u16[max_width * max_height];
++	saved_attrs = new CharAttr[max_width * max_height];
++	saved_linenumbers = new u16[max_height];
++	saved_width = max_width;
++	saved_height = max_height;
++
++	memcpy(saved_linenumbers, linenumbers, sizeof(u16) * max_height);
++
++	for (u16 y = 0; y < height; y++) {
++		u32 src = linenumbers[y] * max_width;
++		u32 dst = y * max_width;
++		memcpy(&saved_text[dst], &text[src], sizeof(u16) * width);
++		memcpy(&saved_attrs[dst], &attrs[src], sizeof(CharAttr) * width);
++		for (u16 x = width; x < max_width; x++) {
++			saved_text[dst + x] = ' ';
++			saved_attrs[dst + x] = default_char_attr;
++		}
++	}
++}
++
++void VTerm::restore_screen()
++{
++	if (!saved_text || !saved_linenumbers) return;
++
++	u16 copy_lines = (height < saved_height) ? height : saved_height;
++	u16 copy_width = (width < saved_width) ? width : saved_width;
++	u16 copy_map = (max_height < saved_height) ? max_height : saved_height;
++
++	memcpy(linenumbers, saved_linenumbers, sizeof(u16) * copy_map);
++	for (u16 i = copy_map; i < max_height; i++) {
++		linenumbers[i] = history_lines + i;
++	}
++
++	// Blank everything first: rows or columns the terminal grew
++	// while in the alternate screen start out empty.
++	clear_area(0, 0, width - 1, height - 1);
++
++	for (u16 y = 0; y < copy_lines; y++) {
++		u32 dst = linenumbers[y] * max_width;
++		u32 src = y * saved_width;
++		memcpy(&text[dst], &saved_text[src], sizeof(u16) * copy_width);
++		memcpy(&attrs[dst], &saved_attrs[src], sizeof(CharAttr) * copy_width);
++		changed_line(y, 0, width - 1);
++	}
++}
++
+ void VTerm::next_line()
+ {
+ 	lf();
+@@ -399,54 +493,69 @@
+ 
+ void VTerm::enable_mode(bool enable)
+ {
+-	switch (param[0] + 1000 * q_mode) {
+-	case 3:
+-		mode_flags.display_ctrl = enable;
+-		break;
+-	case 4:
+-		mode_flags.insert_mode = enable;
+-		break;
+-	case 20: // auto echo cr with lf
+-		mode_flags.crlf = enable;
+-		modeChanged(CRWithLF);
+-		break;
+-	case 1001 :
+-		mode_flags.cursorkey_esco = enable;
+-		modeChanged(CursorKeyEscO);
+-		break;
+-	case 1003 :
+-		mode_flags.col_132 = enable;
+-		break;
+-	case 1005 :
+-		mode_flags.inverse_screen = enable;
+-		for (u16 i = 0; i < height; i++) {
+-			changed_line(i, 0, width - 1);
++	// A sequence can set several modes at once (ESC [ ? 1049 ; 25 h);
++	// handle every parameter, not just the first one.
++	for (u16 n = 0; n <= npar; n++) {
++		switch (param[n] + 1000 * q_mode) {
++		case 3:
++			mode_flags.display_ctrl = enable;
++			break;
++		case 4:
++			mode_flags.insert_mode = enable;
++			break;
++		case 20: // auto echo cr with lf
++			mode_flags.crlf = enable;
++			modeChanged(CRWithLF);
++			break;
++		case 1001 :
++			mode_flags.cursorkey_esco = enable;
++			modeChanged(CursorKeyEscO);
++			break;
++		case 1003 :
++			mode_flags.col_132 = enable;
++			break;
++		case 1005 :
++			mode_flags.inverse_screen = enable;
++			for (u16 i = 0; i < height; i++) {
++				changed_line(i, 0, width - 1);
++			}
++			break;
++		case 1006 :
++			mode_flags.cursor_relative = enable;
++			break;
++		case 1007 :
++			mode_flags.auto_wrap = enable;
++			break;
++		case 1008 :
++			mode_flags.autorepeat_key = enable;
++			modeChanged(AutoRepeatKey);
++			break;
++		case 1009 :
++			mode_flags.mouse_report = (enable ? MouseX10 : MouseNone);
++			modeChanged(MouseReport);
++			break;
++		case 1025 :
++			mode_flags.cursor_visible = enable;
++			modeChanged(CursorVisible);
++			break;
++		case 1047 : // DECSET 47: use alternate screen buffer
++		case 2047 : // DECSET 1047: use alternate screen buffer
++			set_alt_screen(enable, false);
++			break;
++		case 2048 : // DECSET 1048: save/restore cursor
++			if (enable) save_cursor();
++			else restore_cursor();
++			break;
++		case 2049 : // DECSET 1049: save cursor + alternate screen
++			set_alt_screen(enable, true);
++			break;
++		case 2000 :
++			mode_flags.mouse_report = (enable ? MouseX11 : MouseNone);
++			modeChanged(MouseReport);
++			break;
++		default:
++			break;
+ 		}
+-		break;
+-	case 1006 :
+-		mode_flags.cursor_relative = enable;
+-		break;
+-	case 1007 :
+-		mode_flags.auto_wrap = enable;
+-		break;
+-	case 1008 :
+-		mode_flags.autorepeat_key = enable;
+-		modeChanged(AutoRepeatKey);
+-		break;
+-	case 1009 :
+-		mode_flags.mouse_report = (enable ? MouseX10 : MouseNone);
+-		modeChanged(MouseReport);
+-		break;
+-	case 1025 :
+-		mode_flags.cursor_visible = enable;
+-		modeChanged(CursorVisible);
+-		break;
+-	case 2000 :
+-		mode_flags.mouse_report = (enable ? MouseX11 : MouseNone);
+-		modeChanged(MouseReport);
+-		break;
+-	default:
+-		break;
+ 	}
+ }
+ 
+@@ -460,6 +569,25 @@
  	enable_mode(false);
  }
  
@@ -158,7 +448,7 @@ not touched).
  void VTerm::set_display_attr()
  {
  	for (u16 n = 0; n <= npar; n++) {
-@@ -520,8 +545,21 @@
+@@ -520,8 +648,21 @@
  			char_attr.fcolor = param[n] % 10;
  			break;
  		case 38:
@@ -182,7 +472,7 @@ not touched).
  			break;
  		case 39:
  			char_attr.fcolor = cur_fcolor;
-@@ -530,9 +568,31 @@
+@@ -530,9 +671,31 @@
  		case 40 ... 47:
  			char_attr.bcolor = param[n] % 10;
  			break;

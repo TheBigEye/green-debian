@@ -28,11 +28,16 @@
 #       dropped (OSC 8 hyperlinks, OSC 52, titles, ...), except
 #       FbTerm's own palette commands (ESC ] P... / ESC ] R),
 #       which keep working unchanged.
+#     - DECSET/DECRST 47, 1047, 1048, 1049: alternate screen
+#       (ncurses smcup/rmcup), so vim, less, htop and friends
+#       restore your shell screen when they exit. The main
+#       screen is snapshotted and restored; lines scrolled off
+#       in the alternate screen never pollute the scrollback.
 #   FbTerm's CharAttr already stores 8-bit color indices and its
 #   renderer already has a 256-color palette, so the patch only
 #   extends the parser; rendering is untouched. Verified with a
-#   headless harness driving VTerm directly: 21/21 checks pass
-#   (stock parser: 15 of the same 21 fail).
+#   headless harness driving VTerm directly: 40/40 checks pass
+#   (stock parser: 23 of the same 40 fail).
 #
 # What this script does:
 #   1. Downloads the FbTerm 1.7 Debian source (orig tarball,
@@ -283,7 +288,13 @@ Done. Next steps:
      256 colors, no OSC garbage on the Disk line - and the
      fbterm-background login block skips its Perl filter for
      this binary (manual "fastfetch" runs included).
-  3) Check "TERM": terminfo-driven programs still use the
+     Full-screen programs (vim, less, htop, mc) get a real
+     alternate screen and restore your shell when they exit.
+  3) Re-run ./compile-fbterm-256color.sh once: now that the
+     patched binary exists, the fbterm-256color terminfo entry
+     also announces the alternate screen (smcup/rmcup), which
+     is what makes vim/less/htop actually use it.
+  4) Check "TERM": terminfo-driven programs still use the
      fbterm/fbterm-256color entry (private sequences, unchanged);
      programs that hardcode xterm sequences work now too.
 

@@ -686,7 +686,10 @@ Notes:
     into /usr/local/bin/fbterm-patched (stock binary untouched).
     The launcher then uses it automatically and fastfetch runs
     unfiltered - no Perl translation - because bright colors,
-    38;5;n colors and OSC sequences are handled natively.
+    38;5;n colors, OSC sequences and the alternate screen
+    (vim/less/htop restore your shell on exit) are native.
+    Re-run ./compile-fbterm-256color.sh afterwards so the
+    terminfo entry announces that alternate screen.
     Undo with ./build-fbterm-patched.sh --uninstall.
   - No fbi or ImageMagick at runtime: the only viewer is
     ~/.local/bin/idump (static, no dependencies). Its source ships

@@ -28,6 +28,11 @@
 #      this step reports that nothing had to be changed.
 #   --uninstall removes the compiled entry and reverts step 3.
 #
+# Alternate screen: when /usr/local/bin/fbterm-patched exists at
+# compile time, the entry also gets smcup/rmcup (ESC[?1049h/l),
+# so vim/less/htop use the patched binary's alternate screen.
+# With stock fbterm the capability is deliberately not announced.
+#
 # It does NOT replace or recompile the fbterm binary: stock FbTerm
 # already renders the private 256-color sequences. (The AUR patches
 # to the fbterm binary add a configurable palette and a different
@@ -92,11 +97,39 @@ command -v tic >/dev/null 2>&1 || {
 }
 
 mkdir -p "$TERMINFO_DIR"
-tic -x -o "$TERMINFO_DIR" "$TI_FILE" || {
-    echo "Error: tic failed to compile $TI_FILE" >&2
+
+# The alternate screen (smcup/rmcup, used by vim/less/htop via
+# ncurses) is announced only when the patched FbTerm binary is
+# installed (see build-fbterm-patched.sh). Stock FbTerm ignores
+# ESC[?1049h; announcing the capability to it would leave
+# full-screen programs without the screen restore they expect.
+# With fbterm-patched present, the entry is compiled from a
+# temporary copy with two lines added; the shipped
+# fbterm-256color.ti stays unchanged either way. (If you remove
+# fbterm-patched later, re-run this script.)
+TI_SOURCE="$TI_FILE"
+ALT_NOTE="alternate screen not announced (stock fbterm)"
+if [ -x /usr/local/bin/fbterm-patched ]; then
+    TI_SOURCE="$(mktemp)" || {
+        echo "Error: mktemp failed" >&2
+        exit 1
+    }
+    awk '{ print } index($0, "fbterm-256color|") == 1 { print "\tsmcup=\\E[?1049h, rmcup=\\E[?1049l," }' \
+        "$TI_FILE" > "$TI_SOURCE" || {
+        echo "Error: could not prepare the terminfo source" >&2
+        rm -f "$TI_SOURCE"
+        exit 1
+    }
+    ALT_NOTE="alternate screen announced (smcup) for fbterm-patched"
+fi
+
+tic -x -o "$TERMINFO_DIR" "$TI_SOURCE" || {
+    echo "Error: tic failed to compile $TI_SOURCE" >&2
+    [ "$TI_SOURCE" != "$TI_FILE" ] && rm -f "$TI_SOURCE"
     exit 1
 }
-echo "Compiled terminfo entry: $COMPILED"
+[ "$TI_SOURCE" != "$TI_FILE" ] && rm -f "$TI_SOURCE"
+echo "Compiled terminfo entry: $COMPILED ($ALT_NOTE)"
 
 command -v infocmp >/dev/null 2>&1 || {
     echo "Error: infocmp(1) is missing (package ncurses-bin)." >&2
@@ -143,4 +176,9 @@ Done. To use it:
          tput setaf $i; printf ' %s ' "$i"; tput sgr0
        done; echo
      Each number should appear in its own color.
+  4) Alternate screen test (only compiled in when fbterm-patched
+     was present): run "vim" (or "less <file>") and quit; your
+     shell screen, scrollback position included, must come back
+     exactly as it was. Check the capability with:
+       infocmp fbterm-256color | grep smcup
 EOF
