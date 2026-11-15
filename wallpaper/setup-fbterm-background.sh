@@ -44,6 +44,9 @@ LEGACY_BEGIN='# >>> fbterm-fondo (TTY) >>>'
 LEGACY_END='# <<< fbterm-fondo (TTY) <<<'
 
 PROFILE_CANDIDATES=("$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile")
+FISH_CONFIG="$HOME/.config/fish/config.fish"
+FISH_MARK_BEGIN='# >>> fbterm-background fish (TTY) >>>'
+FISH_MARK_END='# <<< fbterm-background fish (TTY) <<<'
 
 # Patched FbTerm (build phase) and terminfo phase.
 PATCH_FILE="$SCRIPT_DIR/fbterm-compat.patch"
@@ -158,6 +161,7 @@ clean_profile_file() {
 
 
 uninstall_core() {
+    remove_block "$FISH_CONFIG" "$FISH_MARK_BEGIN" "$FISH_MARK_END" >/dev/null || true
     for f in "${PROFILE_CANDIDATES[@]}"; do
         clean_profile_file "$f" >/dev/null || true
     done
@@ -555,6 +559,11 @@ verify_install() {
         if [ -f "$f" ] && grep -qF "$MARK_BEGIN" "$f"; then blocks=$((blocks + 1)); fi
     done
     if [ "$blocks" -eq 1 ]; then v_ok "login profile block present (exactly one)"; else v_bad "login profile block count is $blocks (expected 1)"; fi
+    if [ -f "$FISH_CONFIG" ] && grep -qF "$FISH_MARK_BEGIN" "$FISH_CONFIG"; then
+        v_ok "fish login block present (config.fish)"
+    else
+        v_bad "fish login block missing in $FISH_CONFIG"
+    fi
     if command -v infocmp >/dev/null 2>&1 && infocmp fbterm-256color >/dev/null 2>&1; then
         local cols
         cols="$(tput -T fbterm-256color colors 2>/dev/null || echo '?')"
@@ -591,6 +600,9 @@ verify_uninstall() {
             echo "  [FAIL] profile block remains in $f"; leftovers=$((leftovers + 1))
         fi
     done
+    if [ -f "$FISH_CONFIG" ] && grep -qF "$FISH_MARK_BEGIN" "$FISH_CONFIG"; then
+        echo "  [FAIL] fish block remains in $FISH_CONFIG"; leftovers=$((leftovers + 1))
+    fi
     [ -e "$DEST_BIN" ] && { echo "  [FAIL] launcher remains: $DEST_BIN"; leftovers=$((leftovers + 1)); }
     [ -e "$DEST_IDUMP" ] && { echo "  [FAIL] viewer remains: $DEST_IDUMP"; leftovers=$((leftovers + 1)); }
     [ -e "$DEST_DATA" ] && { echo "  [FAIL] data dir remains: $DEST_DATA"; leftovers=$((leftovers + 1)); }
@@ -854,7 +866,10 @@ open_fbterm() {
         # needs no output filter: colors and OSC are native there.
         export FBTERM_PATCHED=1
     fi
-    "$FBTERM_BIN" -- /bin/bash -l >"$LOG_DIR/fbterm.log" 2>&1
+    # Open the user's login shell (bash, fish...) inside FbTerm.
+    SESSION_SHELL="${SHELL:-/bin/bash}"
+    [ -x "$SESSION_SHELL" ] || SESSION_SHELL=/bin/bash
+    "$FBTERM_BIN" -- "$SESSION_SHELL" -l >"$LOG_DIR/fbterm.log" 2>&1
     FBTERM_STATUS=$?
     # Re-show the kernel-console cursor (hidden while painting; see
     # below). FbTerm draws its own cursor while it runs.
@@ -1090,6 +1105,80 @@ fi
 # <<< fbterm-background (TTY) <<<
 EOF_PROFILE
 echo "Automatic startup added to $TARGET_PROFILE"
+
+# Fish reads neither ~/.bash_profile nor ~/.profile: without its own
+# block, switching the login shell to fish (chsh) would silently
+# disable the whole startup. Same logic as the bash block above.
+mkdir -p "$(dirname "$FISH_CONFIG")"
+rc=0
+remove_block "$FISH_CONFIG" "$FISH_MARK_BEGIN" "$FISH_MARK_END" >/dev/null || rc=$?
+if [ "$rc" -ne 0 ]; then
+    echo "Error: $FISH_CONFIG contains a malformed fbterm-background" >&2
+    echo "block and was left untouched. Fix it manually, then run" >&2
+    echo "this again." >&2
+    exit 1
+fi
+cat >> "$FISH_CONFIG" <<'EOF_FISH'
+# >>> fbterm-background fish (TTY) >>>
+# Background with FbTerm + fastfetch on physical TTYs only, no X11/Wayland.
+# Disable without uninstalling: touch ~/.config/fbterm-background/disabled
+if not set -q FBTERM_BACKGROUND_ACTIVE
+    if status is-login; and not set -q DISPLAY; and not set -q WAYLAND_DISPLAY; and not test -f "$HOME/.config/fbterm-background/disabled"
+        set -l _fbterm_tty (tty 2>/dev/null)
+        if string match -qr '^/dev/tty[0-9]+$' -- "$_fbterm_tty"
+            if $HOME/.local/bin/fbterm-background
+                # End the login shell, like exit in the bash block:
+                # a plain exit in config.fish only stops this file.
+                exec true
+            end
+            echo "fbterm-background could not start; you are still on the normal TTY." >&2
+        end
+    end
+else if not set -q FBTERM_FASTFETCH_DONE
+    set -gx FBTERM_FASTFETCH_DONE 1
+    # Prefer the 256-color terminfo name when it has been compiled
+    # (./setup-fbterm-background.sh); stock "fbterm" otherwise.
+    if test "$TERM" = linux
+        if infocmp fbterm-256color >/dev/null 2>&1
+            set -gx TERM fbterm-256color
+        else
+            set -gx TERM fbterm
+        end
+    end
+    if command -q fastfetch
+        if set -q FBTERM_PATCHED
+            # Patched FbTerm handles OSC 8 and bright/256 colours
+            # itself: run fastfetch unfiltered.
+            if command -q timeout
+                timeout 15 fastfetch; or true
+            else
+                fastfetch; or true
+            end
+        else if command -q perl
+            # Stock FbTerm mangles fastfetch, so filter its output
+            # (same Perl filter as the bash block). Applies to the
+            # auto-run and to manual runs in this shell.
+            function fastfetch
+                set -l _ffbin (type -P fastfetch)
+                test -n "$_ffbin"; or return 127
+                if command -q timeout
+                    timeout 15 $_ffbin --pipe false $argv | perl -pe 's/\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)//g; s/\\x1b\\[([0-9;]*)m/ my $p=$1; my @a=split(q{;},$p,-1); my $pre=""; @a=map { if ($_ >= 100 && $_ <= 107) { $pre="5;"; $_ - 60 } elsif ($_ >= 90 && $_ <= 97) { $pre="1;"; $_ - 60 } else { $_ } } @a; "\\x1b[" . $pre . join(";", @a) . "m" /ge'
+                    return $pipestatus[1]
+                end
+                $_ffbin --pipe false $argv | perl -pe 's/\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)//g; s/\\x1b\\[([0-9;]*)m/ my $p=$1; my @a=split(q{;},$p,-1); my $pre=""; @a=map { if ($_ >= 100 && $_ <= 107) { $pre="5;"; $_ - 60 } elsif ($_ >= 90 && $_ <= 97) { $pre="1;"; $_ - 60 } else { $_ } } @a; "\\x1b[" . $pre . join(";", @a) . "m" /ge'
+                return $pipestatus[1]
+            end
+            fastfetch; or true
+        else if command -q timeout
+            timeout 15 fastfetch; or true
+        else
+            fastfetch; or true
+        end
+    end
+end
+# <<< fbterm-background fish (TTY) <<<
+EOF_FISH
+echo "Automatic startup added to $FISH_CONFIG (fish)"
 }
 
 
