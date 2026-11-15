@@ -10,32 +10,39 @@ in FbShell::adjustCharAttr (VGA trick); with real bright
 backgrounds available that only corrupts colours - fastfetch's
 black colour square came out grey - so the patch removes it.
 
-With a background image, FbTerm paints every cell whose
-background equals color-background (0) by copying the image,
-so an explicit black background (SGR 40, 48;5;0) looked
-transparent. CharAttr now carries bg_set, set by every SGR
-background sequence and cleared by SGR 0/49, and the render
-code paints the colour instead of the image when it is set.
-Plain text keeps the transparent background.
+Two more stock parser gaps, same symptom (escape tails printed
+as text): a CSI sequence with a private prefix (< = >), colon
+sub-parameters or intermediate bytes aborted the sequence at
+that byte and printed the rest - fish's ESC[>4;1m came out as
+"4;1m" at every prompt. Such sequences now enter an ignore
+state and are swallowed up to their final byte. And with a
+background image, an explicit black background (SGR 40,
+48;5;0) used to look transparent: CharAttr now carries bg_set,
+set by every SGR background sequence and cleared by SGR 0/49,
+and the render code paints the colour instead of the image
+when it is set. Plain text keeps the transparent background.
 
 Changes:
   vterm_action.cpp  SGR extended colours; alternate screen
                     (47/1047 swap buffer, 1048 cursor, 1049 both;
                     scrollback untouched by the alternate screen)
-  vterm_states.cpp  ESC ] enters the OSC state; ESC \ = ST
+  vterm_states.cpp  ESC ] enters the OSC state; ESC \ = ST;
+                    unsupported CSI prefixes/intermediates enter
+                    the ignore state
   vterm.cpp         OSC bytes swallowed until BEL/CAN/SUB/ST
                     (FbTerm palette OSC ] P / ] R still works);
+                    ignored CSI swallowed to its final byte;
                     no history saves from the alternate screen
-  vterm.h           ESosc state, OSC/alternate-screen members,
-                    CharAttr bg_set flag
+  vterm.h           ESosc/ESignore states, OSC/alternate-screen
+                    members, CharAttr bg_set flag
   fbshell.cpp       blink no longer brightens the background;
                     passes bg_set to the screen
   screen.h/.cpp,    bg_set threaded through text drawing;
   screen_render.cpp explicit background painted over the image
 
-Parser verified with a headless VTerm harness: 40/40 checks
-pass, stock parser fails 23 of the same 40; explicit-background
-checks 9/9.
+Parser verified with a headless VTerm harness: colour/OSC/
+alternate-screen checks, explicit-background checks 9/9,
+private-CSI checks 7/7.
 
 Apply after the Debian patch series (the setup script does the
 whole cycle):  patch -p1 < fbterm-compat.patch
@@ -75,7 +82,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  
  	typedef enum {
 -		ESnormal = 0, ESesc, ESsquare, ESnonstd, ESpercent, EScharset, EShash, ESfunckey, ESkeep
-+		ESnormal = 0, ESesc, ESsquare, ESnonstd, ESpercent, EScharset, EShash, ESfunckey, ESosc, ESkeep
++		ESnormal = 0, ESesc, ESsquare, ESnonstd, ESpercent, EScharset, EShash, ESfunckey, ESosc, ESignore, ESkeep
  	} EscapeState;
  
  	EscapeState esc_state;
@@ -107,12 +114,25 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  	{ '%', 0,	ESpercent },
  	{ '#', 0,	EShash },
  	{ '(', &VTerm::current_is_g0,	EScharset },
-@@ -133,4 +134,7 @@
+@@ -69,6 +70,9 @@
+ 
+ 	// ESsquare
+ 	{ '[', 0,	ESfunckey },
++	{ '<' | ADDSAME(2), 0,	ESignore }, // CSI private prefixes < = >
++	{ ':', 0,	ESignore }, // colon sub-parameters (ESC[38:5:...m)
++	{ ' ' | ADDSAME(15), 0,	ESignore }, // intermediate bytes (ESC[2 q)
+ 	{ '?', &VTerm::set_q_mode,	ESkeep },
+ 	{ '0' | ADDSAME(9), &VTerm::param_digit,	ESkeep },
+ 	{ ';', &VTerm::next_param,	ESkeep },
+@@ -133,4 +137,10 @@
  
  	// ESfunckey
  	{ 0xFFFF },
 +
 +	// ESosc
++	{ 0xFFFF },
++
++	// ESignore
 +	{ 0xFFFF },
  };
 --- a/src/lib/vterm.cpp
@@ -165,10 +185,21 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  
  	pending_scroll = 0;
  	scroll_top = 0;
-@@ -469,6 +480,31 @@
+@@ -469,6 +480,42 @@
  
  void VTerm::do_control_char()
  {
++	/* A CSI sequence FbTerm does not implement (private prefix,
++	 * colon sub-parameters, intermediate bytes: kitty keyboard
++	 * ESC[=5u, fish's ESC[>4;1m, DECSCUSR ESC[2 q...) is swallowed
++	 * whole up to its final byte (0x40-0x7e) instead of printing
++	 * the parameter bytes as text. C0 controls (ESC, CAN...) fall
++	 * through to the normal dispatch and abort the sequence. */
++	if (esc_state == ESignore && cur_char >= 0x20) {
++		if (cur_char >= 0x40 && cur_char <= 0x7e) esc_state = ESnormal;
++		return;
++	}
++
 +	/* Inside an OSC sequence (ESC ] ...), swallow every character
 +	 * until a terminator arrives: BEL, CAN, SUB, or ST (ESC \).
 +	 * The palette commands (ESC ] P... / ESC ] R) are the only OSC
@@ -197,7 +228,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  	u8 index = (cur_char < MAX_CONTROL_CODE ? control_map[cur_char] : 0);
  	const Sequence *seq = control_sequences + index;
  
-@@ -608,7 +644,7 @@
+@@ -608,7 +655,7 @@
  	if (num > mx) num = mx;
  	if (-num > mx) num = -mx;
  
@@ -206,7 +237,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  		history_scroll(num);
  	}
  
-@@ -778,6 +814,7 @@
+@@ -778,6 +825,7 @@
  
  void VTerm::historyDisplay(bool absolute, s32 num)
  {
