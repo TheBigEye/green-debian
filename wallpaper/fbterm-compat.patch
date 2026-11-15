@@ -1,5 +1,6 @@
---- a/src/Makefile.am
-+++ b/src/Makefile.am
+diff -ruN a/src/Makefile.am b/src/Makefile.am
+--- a/src/Makefile.am	2010-10-18 08:20:11.000000000 +0000
++++ b/src/Makefile.am	2026-11-15 05:42:34.387213304 +0000
 @@ -3,7 +3,7 @@
  bin_PROGRAMS = fbterm
  
@@ -9,9 +10,10 @@
  	screen_render.cpp fbdev.cpp fbdev.h vesadev.cpp vesadev.h vbe.h
  EXTRA_fbterm_SOURCES = signalfd.h
  
---- a/src/fbshell.cpp
-+++ b/src/fbshell.cpp
-@@ -33,6 +33,7 @@
+diff -ruN a/src/fbshell.cpp b/src/fbshell.cpp
+--- a/src/fbshell.cpp	2010-10-18 08:20:11.000000000 +0000
++++ b/src/fbshell.cpp	2026-11-15 05:42:34.391213304 +0000
+@@ -33,28 +33,35 @@
  #include "screen.h"
  #include "improxy.h"
  #include "fbterm.h"
@@ -19,7 +21,49 @@
  #include "font.h"
  #include "input.h"
  
-@@ -368,7 +369,7 @@
+ #define screen (Screen::instance())
+ #define manager (FbShellManager::instance())
+ 
++/* The first 16 colours are brightened compared to the classic VGA
++ * palette: dark blue #0000aa on black (or on a background image) is
++ * almost unreadable, and the same goes for dark red and the grey used
++ * for comments. These values keep the usual hues but stay legible on
++ * dark backgrounds. The 256-colour cube below is the xterm standard
++ * and is not touched. */
+ static const Color defaultPalette[NR_COLORS] = {
+ 	{0x00, 0x00, 0x00}, /* 0 */
+-	{0xaa, 0x00, 0x00}, /* 1 */
+-	{0x00, 0xaa, 0x00}, /* 2 */
+-	{0xaa, 0x55, 0x00}, /* 3 */
+-	{0x00, 0x00, 0xaa}, /* 4 */
+-	{0xaa, 0x00, 0xaa}, /* 5 */
+-	{0x00, 0xaa, 0xaa}, /* 6 */
+-	{0xaa, 0xaa, 0xaa}, /* 7 */
+-	{0x55, 0x55, 0x55}, /* 8 */
+-	{0xff, 0x55, 0x55}, /* 9 */
+-	{0x55, 0xff, 0x55}, /* 10 */
+-	{0xff, 0xff, 0x55}, /* 11 */
+-	{0x55, 0x55, 0xff}, /* 12 */
+-	{0xff, 0x55, 0xff}, /* 13 */
+-	{0x55, 0xff, 0xff}, /* 14 */
++	{0xd0, 0x30, 0x30}, /* 1 */
++	{0x2f, 0xb3, 0x2f}, /* 2 */
++	{0xd0, 0x95, 0x1e}, /* 3 */
++	{0x2b, 0x5c, 0xff}, /* 4 */
++	{0xd0, 0x3f, 0xd0}, /* 5 */
++	{0x1f, 0xb8, 0xc8}, /* 6 */
++	{0xc8, 0xc8, 0xc8}, /* 7 */
++	{0x78, 0x78, 0x78}, /* 8 */
++	{0xff, 0x6b, 0x6b}, /* 9 */
++	{0x69, 0xf0, 0x69}, /* 10 */
++	{0xff, 0xff, 0x6b}, /* 11 */
++	{0x7d, 0xa8, 0xff}, /* 12 */
++	{0xff, 0x7d, 0xff}, /* 13 */
++	{0x6b, 0xff, 0xff}, /* 14 */
+ 	{0xff, 0xff, 0xff}, /* 15 */
+ 
+ 	{0x00, 0x00, 0x00}, /* 16 */
+@@ -368,7 +375,7 @@
  	if (manager->activeShell() != this) return;
  
  	adjustCharAttr(attr);
@@ -28,7 +72,7 @@
  
  	if (mImProxy) {
  		Rectangle rect = { FW(x), FH(y), FW(w), FH(1) };
-@@ -425,7 +426,7 @@
+@@ -425,7 +432,7 @@
  		break;
  
  	case CurUnderline:
@@ -37,7 +81,7 @@
  		if (mImProxy) {
  			Rectangle rect = { FW(mCursor.x), FH(mCursor.y + 1) - 1, FW(1), 1 };
  			mImProxy->redrawImWin(rect);
-@@ -502,6 +503,12 @@
+@@ -502,6 +509,12 @@
  		changeMode(CRWithLF, mode(CRWithLF));
  	}
  
@@ -50,7 +94,7 @@
  	if (type & (CursorKeyEscO | ApplicKeypad | CRWithLF)) {
  		reportMode();
  	}
-@@ -660,7 +667,7 @@
+@@ -660,7 +673,7 @@
  		u16 code = charCode(x, y);
  
  		if (attr.type == CharAttr::DoubleRight) x--;
@@ -59,7 +103,7 @@
  
  		mMousePointer.x = x;
  		mMousePointer.y = y;
-@@ -700,13 +707,13 @@
+@@ -700,13 +713,13 @@
  	else if (attr.underline) attr.fcolor = 6; // cyan
  	else if (attr.intensity == 0) attr.fcolor = 8; // gray
  
@@ -74,8 +118,9 @@
  
  		if (attr.bcolor > 8 && attr.bcolor < 16) attr.bcolor -= 8;
  	}
---- a/src/input.cpp
-+++ b/src/input.cpp
+diff -ruN a/src/input.cpp b/src/input.cpp
+--- a/src/input.cpp	2010-10-18 08:20:11.000000000 +0000
++++ b/src/input.cpp	2026-11-15 05:42:34.391213304 +0000
 @@ -28,6 +28,7 @@
  #include <linux/input.h>
  #include "input.h"
@@ -247,8 +292,9 @@
 +		ioctl(STDIN_FILENO, KDSETLED, leds);
 +	}
 +}
---- a/src/input.h
-+++ b/src/input.h
+diff -ruN a/src/input.h b/src/input.h
+--- a/src/input.h	2010-10-18 08:20:11.000000000 +0000
++++ b/src/input.h	2026-11-15 05:42:34.391213304 +0000
 @@ -24,19 +24,34 @@
  #include "io.h"
  #include "instance.h"
@@ -284,885 +330,9 @@
  };
  
  #endif
---- a/src/lib/vterm.cpp
-+++ b/src/lib/vterm.cpp
-@@ -25,7 +25,7 @@
- #define MIN(a, b) ((a) < (b) ? (a) : (b))
- #define MAX(a, b) ((a) > (b) ? (a) : (b))
- 
--VTerm::CharAttr VTerm::default_char_attr = { 0, 0, 1, 0, 0, 0, 0, VTerm::CharAttr::Single };
-+VTerm::CharAttr VTerm::default_char_attr = { 0, 0, 1, 0, 0, 0, 0, 0, VTerm::CharAttr::Single };
- 
- VTerm::CharAttr VTerm::normal_char_attr()
- {
-@@ -50,6 +50,7 @@
- 
- 	a.fcolor = char_attr.fcolor;
- 	a.bcolor = char_attr.bcolor;
-+	a.bg_set = char_attr.bg_set;
- 	a.blink = char_attr.blink;
- 
- 	return a;
-@@ -112,6 +113,12 @@
- 	history_save_line = 0;
- 	visual_start_line = 0;
- 
-+	alt_active = false;
-+	saved_text = 0;
-+	saved_attrs = 0;
-+	saved_linenumbers = 0;
-+	saved_width = saved_height = 0;
-+
- 	reset();
- 	resize(w, h);
- }
-@@ -122,6 +129,9 @@
- 
- 	delete[] text;
- 	delete[] attrs;
-+	delete[] saved_text;
-+	delete[] saved_attrs;
-+	delete[] saved_linenumbers;
- 	delete[] tab_stops;
- 	delete[] linenumbers;
- 	delete[] dirty_startx;
-@@ -138,6 +148,8 @@
- 	charset = g0_charset;
- 
- 	esc_state = ESnormal;
-+	alt_active = false;
-+	memset(mKitty, 0, sizeof(mKitty));
- 
- 	pending_scroll = 0;
- 	scroll_top = 0;
-@@ -469,6 +481,42 @@
- 
- void VTerm::do_control_char()
- {
-+	/* A CSI sequence FbTerm does not implement (private prefix,
-+	 * colon sub-parameters, intermediate bytes: kitty keyboard
-+	 * ESC[=5u, fish's ESC[>4;1m, DECSCUSR ESC[2 q...) is swallowed
-+	 * whole up to its final byte (0x40-0x7e) instead of printing
-+	 * the parameter bytes as text. C0 controls (ESC, CAN...) fall
-+	 * through to the normal dispatch and abort the sequence. */
-+	if (esc_state == ESignore && cur_char >= 0x20) {
-+		if (cur_char >= 0x40 && cur_char <= 0x7e) esc_state = ESnormal;
-+		return;
-+	}
-+
-+	/* Inside an OSC sequence (ESC ] ...), swallow every character
-+	 * until a terminator arrives: BEL, CAN, SUB, or ST (ESC \).
-+	 * The palette commands (ESC ] P... / ESC ] R) are the only OSC
-+	 * sequences FbTerm implements; they are handed over to the
-+	 * legacy ESnonstd state. Everything else (OSC 8 hyperlinks,
-+	 * OSC 52 clipboard data, window titles, ...) is silently
-+	 * dropped, as other terminals do with unknown OSC sequences. */
-+	if (esc_state == ESosc) {
-+		if (cur_char == 0x07 || cur_char == 0x18 || cur_char == 0x1A) {
-+			esc_state = ESnormal;
-+			return;
-+		}
-+		if (cur_char != 0x1B) {
-+			if (osc_first) {
-+				osc_first = false;
-+				if (cur_char == 'P' || cur_char == 'R')
-+					esc_state = ESnonstd;
-+				else
-+					return;
-+			} else {
-+				return;
-+			}
-+		}
-+	}
-+
- 	u8 index = (cur_char < MAX_CONTROL_CODE ? control_map[cur_char] : 0);
- 	const Sequence *seq = control_sequences + index;
- 
-@@ -476,6 +524,16 @@
- 		seq = escape_sequences + (cur_char < MAX_ESCAPE_CODE ? escape_map[esc_state][cur_char] : 0);
- 	}
- 
-+	/* An unknown privately-prefixed CSI (CSI > 4;1m modifyOtherKeys,
-+	 * CSI = ... with a final we do not implement...) is swallowed
-+	 * whole, as before; only CSI ... u is handled (kitty keyboard).
-+	 * SCO restore-cursor (plain CSI u) is unaffected. */
-+	if (esc_state == ESsquare && csi_prefix && seq->next == ESnormal && cur_char != 'u') {
-+		csi_prefix = 0;
-+		esc_state = ESnormal;
-+		return;
-+	}
-+
- 	if (seq->action) (this->*(seq->action))();
- 	if (seq->next != ESkeep) esc_state = seq->next;
- }
-@@ -608,7 +666,7 @@
- 	if (num > mx) num = mx;
- 	if (-num > mx) num = -mx;
- 
--	if (start_y == 0 && num > 0) {
-+	if (start_y == 0 && num > 0 && !alt_active) {
- 		history_scroll(num);
- 	}
- 
-@@ -778,6 +836,7 @@
- 
- void VTerm::historyDisplay(bool absolute, s32 num)
- {
-+	if (alt_active) return;
- 	if (!history_lines || (absolute && num == (s32)visual_start_line) || (!absolute && !num)) return;
- 
- 	u32 bak_line = visual_start_line;
---- a/src/lib/vterm.h
-+++ b/src/lib/vterm.h
-@@ -32,7 +32,7 @@
- 
- 		bool operator != (const CharAttr a) {
- 			return fcolor != a.fcolor || bcolor != a.bcolor || intensity != a.intensity
--				|| italic != a.italic || underline != a.underline || blink != a.blink || reverse != a.reverse;
-+				|| italic != a.italic || underline != a.underline || blink != a.blink || reverse != a.reverse || bg_set != a.bg_set;
- 		}
- 
- 		u16 fcolor : 8;
-@@ -42,6 +42,7 @@
- 		u16 underline : 1;
- 		u16 blink : 1;
- 		u16 reverse : 1;
-+		u16 bg_set : 1; // background set explicitly (paint it even if it is colour 0)
- 		u16 type : 2;
- 	};
- 
-@@ -61,6 +62,7 @@
- 		AutoRepeatKey = 16,
- 		ApplicKeypad = 32,
- 		CRWithLF = 64,
-+		KittyKeyboard = 128,
- 		AllModes = 0xff,
- 	} ModeType;
- 
-@@ -77,6 +79,8 @@
- 
- 	u16 w() { return width; }
- 	u16 h() { return height; }
-+	// kitty keyboard protocol: current flags of the active screen
-+	u8 kittyFlags() { return mKitty[alt_active ? 1 : 0].flags; }
- 	void historyDisplay(bool absolute, s32 num);
- 	u16 mode(ModeType type);
- 	void resize(u16 w, u16 h);
-@@ -100,6 +104,19 @@
- 	virtual void requestUpdate(u16 x, u16 y, u16 w, u16 h);
- 
- private:
-+	// kitty keyboard protocol (CSI = / > / < / ? ... u)
-+	struct KittyState {
-+		u8 flags;
-+		u8 stack[16];
-+		u8 sp;
-+	};
-+	KittyState mKitty[2]; // 0 = main screen, 1 = alternate screen
-+	u8 csi_prefix; // '<', '=' or '>' seen in this CSI, 0 = none
-+	KittyState &kittyState() { return mKitty[alt_active ? 1 : 0]; }
-+	void kittyChanged();
-+	void set_csi_prefix();
-+	void csi_u();
-+
- 	// utility functions
- 	void do_normal_char();
- 	void do_control_char();
-@@ -167,6 +184,10 @@
- 	u32 translate_char(u32);
- 	void set_cursor_type();
- 	void linux_specific();
-+	void begin_osc();
-+	void set_alt_screen(bool enter, bool with_cursor);
-+	void save_screen();
-+	void restore_screen();
- 	void begin_set_palette();
- 	void set_palette();
- 	void reset_palette();
-@@ -185,7 +206,7 @@
- 	static bool init_ambiguous_wide();
- 
- 	typedef enum {
--		ESnormal = 0, ESesc, ESsquare, ESnonstd, ESpercent, EScharset, EShash, ESfunckey, ESkeep
-+		ESnormal = 0, ESesc, ESsquare, ESnonstd, ESpercent, EScharset, EShash, ESfunckey, ESosc, ESignore, ESkeep
- 	} EscapeState;
- 
- 	EscapeState esc_state;
-@@ -266,6 +287,15 @@
- 	#define NPAR 16
- 	u16 npar, param[NPAR];
- 	bool q_mode, palette_mode;
-+	bool osc_first; // true until the first char of an OSC sequence is seen
-+
-+	// alternate screen (DECSET 47/1047/1048/1049): snapshot of the
-+	// main screen, restored when the alternate screen is left
-+	bool alt_active;
-+	u16 *saved_text;
-+	CharAttr *saved_attrs;
-+	u16 *saved_linenumbers;
-+	u16 saved_width, saved_height;
- 
- 	//history
- 	static u16 history_lines;
---- a/src/lib/vterm_action.cpp
-+++ b/src/lib/vterm_action.cpp
-@@ -92,10 +92,64 @@
- {
- 	q_mode = 0;
- 	palette_mode = 0;
-+	csi_prefix = 0;
- 	npar = 0;
- 	memset(param, 0, sizeof(param));
- }
- 
-+void VTerm::set_csi_prefix()
-+{
-+	csi_prefix = cur_char;
-+}
-+
-+void VTerm::kittyChanged()
-+{
-+	modeChanged(KittyKeyboard);
-+}
-+
-+// CSI = flags ; mode u (set), CSI > flags u (push), CSI < n u (pop),
-+// CSI ? u (query). Without prefix or '?', CSI u is SCO restore cursor.
-+void VTerm::csi_u()
-+{
-+	KittyState &st = kittyState();
-+
-+	if (csi_prefix == '=') {
-+		u8 mode = (npar >= 1 && param[1]) ? param[1] : 1;
-+		u8 flags = param[0] & 31;
-+		if (mode == 2) st.flags |= flags;
-+		else if (mode == 3) st.flags &= ~flags;
-+		else st.flags = flags;
-+		kittyChanged();
-+	} else if (csi_prefix == '>') {
-+		if (st.sp < sizeof(st.stack) / sizeof(st.stack[0]))
-+			st.stack[st.sp++] = st.flags;
-+		st.flags = param[0] & 31;
-+		kittyChanged();
-+	} else if (csi_prefix == '<') {
-+		u16 n = param[0] ? param[0] : 1;
-+		while (n--) {
-+			if (!st.sp) { // popping an empty stack resets all flags
-+				st.flags = 0;
-+				break;
-+			}
-+			st.flags = st.stack[--st.sp];
-+		}
-+		kittyChanged();
-+	} else if (q_mode) {
-+		s8 str[16];
-+		snprintf(str, sizeof(str), "\e[?%du", st.flags);
-+		sendBack(str);
-+	} else {
-+		restore_cursor();
-+	}
-+}
-+
-+void VTerm::begin_osc()
-+{
-+	clear_param();
-+	osc_first = true;
-+}
-+
- void VTerm::save_cursor()
- {
- 	s_g0_charset = g0_charset;
-@@ -118,6 +172,97 @@
- 	move_cursor(s_cursor_x, s_cursor_y);
- }
- 
-+// Alternate screen (DECSET 47/1047/1048/1049), as used by vim, less,
-+// htop, mc and ncurses (smcup/rmcup): entering saves the main screen
-+// and switches to a fresh, cleared one; leaving restores the main
-+// screen (and, for 1049/1048, the cursor and rendition saved on
-+// entry). The history buffer is never touched: lines scrolled off
-+// inside the alternate screen are lost, like in xterm.
-+void VTerm::set_alt_screen(bool enter, bool with_cursor)
-+{
-+	if (enter == alt_active) return;
-+
-+	// A pending fast scroll belongs to the screen being left;
-+	// dropping it is always safe (everything is redrawn below).
-+	pending_scroll = 0;
-+
-+	if (enter) {
-+		if (with_cursor) save_cursor();
-+		save_screen();
-+
-+		for (u16 i = 0; i < max_height; i++) {
-+			linenumbers[i] = history_lines + i;
-+		}
-+		visual_start_line = total_history_lines();
-+		scroll_top = 0;
-+		scroll_bot = height - 1;
-+		alt_active = true;
-+		clear_area(0, 0, width - 1, height - 1);
-+		move_cursor(0, 0);
-+	} else {
-+		restore_screen();
-+		alt_active = false;
-+		scroll_top = 0;
-+		scroll_bot = height - 1;
-+		if (with_cursor) restore_cursor();
-+	}
-+
-+	// main and alternate screens have independent kitty flag stacks
-+	kittyChanged();
-+}
-+
-+void VTerm::save_screen()
-+{
-+	delete[] saved_text;
-+	delete[] saved_attrs;
-+	delete[] saved_linenumbers;
-+
-+	saved_text = new u16[max_width * max_height];
-+	saved_attrs = new CharAttr[max_width * max_height];
-+	saved_linenumbers = new u16[max_height];
-+	saved_width = max_width;
-+	saved_height = max_height;
-+
-+	memcpy(saved_linenumbers, linenumbers, sizeof(u16) * max_height);
-+
-+	for (u16 y = 0; y < height; y++) {
-+		u32 src = linenumbers[y] * max_width;
-+		u32 dst = y * max_width;
-+		memcpy(&saved_text[dst], &text[src], sizeof(u16) * width);
-+		memcpy(&saved_attrs[dst], &attrs[src], sizeof(CharAttr) * width);
-+		for (u16 x = width; x < max_width; x++) {
-+			saved_text[dst + x] = ' ';
-+			saved_attrs[dst + x] = default_char_attr;
-+		}
-+	}
-+}
-+
-+void VTerm::restore_screen()
-+{
-+	if (!saved_text || !saved_linenumbers) return;
-+
-+	u16 copy_lines = (height < saved_height) ? height : saved_height;
-+	u16 copy_width = (width < saved_width) ? width : saved_width;
-+	u16 copy_map = (max_height < saved_height) ? max_height : saved_height;
-+
-+	memcpy(linenumbers, saved_linenumbers, sizeof(u16) * copy_map);
-+	for (u16 i = copy_map; i < max_height; i++) {
-+		linenumbers[i] = history_lines + i;
-+	}
-+
-+	// Blank everything first: rows or columns the terminal grew
-+	// while in the alternate screen start out empty.
-+	clear_area(0, 0, width - 1, height - 1);
-+
-+	for (u16 y = 0; y < copy_lines; y++) {
-+		u32 dst = linenumbers[y] * max_width;
-+		u32 src = y * saved_width;
-+		memcpy(&text[dst], &saved_text[src], sizeof(u16) * copy_width);
-+		memcpy(&attrs[dst], &saved_attrs[src], sizeof(CharAttr) * copy_width);
-+		changed_line(y, 0, width - 1);
-+	}
-+}
-+
- void VTerm::next_line()
- {
- 	lf();
-@@ -399,54 +544,69 @@
- 
- void VTerm::enable_mode(bool enable)
- {
--	switch (param[0] + 1000 * q_mode) {
--	case 3:
--		mode_flags.display_ctrl = enable;
--		break;
--	case 4:
--		mode_flags.insert_mode = enable;
--		break;
--	case 20: // auto echo cr with lf
--		mode_flags.crlf = enable;
--		modeChanged(CRWithLF);
--		break;
--	case 1001 :
--		mode_flags.cursorkey_esco = enable;
--		modeChanged(CursorKeyEscO);
--		break;
--	case 1003 :
--		mode_flags.col_132 = enable;
--		break;
--	case 1005 :
--		mode_flags.inverse_screen = enable;
--		for (u16 i = 0; i < height; i++) {
--			changed_line(i, 0, width - 1);
-+	// A sequence can set several modes at once (ESC [ ? 1049 ; 25 h);
-+	// handle every parameter, not just the first one.
-+	for (u16 n = 0; n <= npar; n++) {
-+		switch (param[n] + 1000 * q_mode) {
-+		case 3:
-+			mode_flags.display_ctrl = enable;
-+			break;
-+		case 4:
-+			mode_flags.insert_mode = enable;
-+			break;
-+		case 20: // auto echo cr with lf
-+			mode_flags.crlf = enable;
-+			modeChanged(CRWithLF);
-+			break;
-+		case 1001 :
-+			mode_flags.cursorkey_esco = enable;
-+			modeChanged(CursorKeyEscO);
-+			break;
-+		case 1003 :
-+			mode_flags.col_132 = enable;
-+			break;
-+		case 1005 :
-+			mode_flags.inverse_screen = enable;
-+			for (u16 i = 0; i < height; i++) {
-+				changed_line(i, 0, width - 1);
-+			}
-+			break;
-+		case 1006 :
-+			mode_flags.cursor_relative = enable;
-+			break;
-+		case 1007 :
-+			mode_flags.auto_wrap = enable;
-+			break;
-+		case 1008 :
-+			mode_flags.autorepeat_key = enable;
-+			modeChanged(AutoRepeatKey);
-+			break;
-+		case 1009 :
-+			mode_flags.mouse_report = (enable ? MouseX10 : MouseNone);
-+			modeChanged(MouseReport);
-+			break;
-+		case 1025 :
-+			mode_flags.cursor_visible = enable;
-+			modeChanged(CursorVisible);
-+			break;
-+		case 1047 : // DECSET 47: use alternate screen buffer
-+		case 2047 : // DECSET 1047: use alternate screen buffer
-+			set_alt_screen(enable, false);
-+			break;
-+		case 2048 : // DECSET 1048: save/restore cursor
-+			if (enable) save_cursor();
-+			else restore_cursor();
-+			break;
-+		case 2049 : // DECSET 1049: save cursor + alternate screen
-+			set_alt_screen(enable, true);
-+			break;
-+		case 2000 :
-+			mode_flags.mouse_report = (enable ? MouseX11 : MouseNone);
-+			modeChanged(MouseReport);
-+			break;
-+		default:
-+			break;
- 		}
--		break;
--	case 1006 :
--		mode_flags.cursor_relative = enable;
--		break;
--	case 1007 :
--		mode_flags.auto_wrap = enable;
--		break;
--	case 1008 :
--		mode_flags.autorepeat_key = enable;
--		modeChanged(AutoRepeatKey);
--		break;
--	case 1009 :
--		mode_flags.mouse_report = (enable ? MouseX10 : MouseNone);
--		modeChanged(MouseReport);
--		break;
--	case 1025 :
--		mode_flags.cursor_visible = enable;
--		modeChanged(CursorVisible);
--		break;
--	case 2000 :
--		mode_flags.mouse_report = (enable ? MouseX11 : MouseNone);
--		modeChanged(MouseReport);
--		break;
--	default:
--		break;
- 	}
- }
- 
-@@ -460,6 +620,25 @@
- 	enable_mode(false);
- }
- 
-+/* Map a 24-bit RGB colour onto the xterm 256-colour palette
-+ * (6x6x6 colour cube; grey ramp for greys). FbTerm has no truecolor
-+ * framebuffer mode, so SGR 38;2/48;2 colours are approximated. */
-+static u8 rgb_to_256(u16 r, u16 g, u16 b)
-+{
-+	if (r > 255) r = 255;
-+	if (g > 255) g = 255;
-+	if (b > 255) b = 255;
-+
-+	if (r == g && g == b) {
-+		if (r < 8) return 16;
-+		if (r > 248) return 231;
-+		return 232 + (r - 8) * 24 / 247;
-+	}
-+
-+	return 16 + 36 * ((r * 5 + 127) / 255)
-+		+ 6 * ((g * 5 + 127) / 255) + ((b * 5 + 127) / 255);
-+}
-+
- void VTerm::set_display_attr()
- {
- 	for (u16 n = 0; n <= npar; n++) {
-@@ -520,8 +699,21 @@
- 			char_attr.fcolor = param[n] % 10;
- 			break;
- 		case 38:
--			char_attr.fcolor = cur_fcolor;
--			char_attr.underline = true;
-+			if (n + 2 <= npar && param[n + 1] == 5) {
-+				// SGR 38;5;<n>: 256-colour foreground
-+				char_attr.fcolor = param[n + 2];
-+				n += 2;
-+			} else if (n + 4 <= npar && param[n + 1] == 2) {
-+				// SGR 38;2;<r>;<g>;<b>: truecolor (approximated)
-+				char_attr.fcolor = rgb_to_256(param[n + 2], param[n + 3], param[n + 4]);
-+				n += 4;
-+			} else if (n < npar && (param[n + 1] == 5 || param[n + 1] == 2)) {
-+				// truncated extended colour sequence: ignore it
-+				n = npar;
-+			} else {
-+				char_attr.fcolor = cur_fcolor;
-+				char_attr.underline = true;
-+			}
- 			break;
- 		case 39:
- 			char_attr.fcolor = cur_fcolor;
-@@ -529,9 +721,36 @@
- 			break;
- 		case 40 ... 47:
- 			char_attr.bcolor = param[n] % 10;
-+			char_attr.bg_set = true;
-+			break;
-+		case 48:
-+			if (n + 2 <= npar && param[n + 1] == 5) {
-+				// SGR 48;5;<n>: 256-colour background
-+				char_attr.bcolor = param[n + 2];
-+				char_attr.bg_set = true;
-+				n += 2;
-+			} else if (n + 4 <= npar && param[n + 1] == 2) {
-+				// SGR 48;2;<r>;<g>;<b>: truecolor (approximated)
-+				char_attr.bcolor = rgb_to_256(param[n + 2], param[n + 3], param[n + 4]);
-+				char_attr.bg_set = true;
-+				n += 4;
-+			} else if (n < npar && (param[n + 1] == 5 || param[n + 1] == 2)) {
-+				// truncated extended colour sequence: ignore it
-+				n = npar;
-+			}
- 			break;
- 		case 49:
- 			char_attr.bcolor = cur_bcolor;
-+			char_attr.bg_set = false;
-+			break;
-+		case 90 ... 97:
-+			// bright foreground colours
-+			char_attr.fcolor = param[n] - 90 + 8;
-+			break;
-+		case 100 ... 107:
-+			// bright background colours
-+			char_attr.bcolor = param[n] - 100 + 8;
-+			char_attr.bg_set = true;
- 			break;
- 		default :
- 			break;
-@@ -689,7 +908,10 @@
- 		break;
- 
- 	case 2:
--		if (npar == 1) char_attr.bcolor = param[1];
-+		if (npar == 1) {
-+			char_attr.bcolor = param[1];
-+			char_attr.bg_set = true;
-+		}
- 		break;
- 
- 	case 3:
---- a/src/lib/vterm_states.cpp
-+++ b/src/lib/vterm_states.cpp
-@@ -50,7 +50,8 @@
- 
- 	// ESesc
- 	{ '[', &VTerm::clear_param,	ESsquare },
--	{ ']', &VTerm::clear_param,	ESnonstd },
-+	{ ']', &VTerm::begin_osc,	ESosc },
-+	{ '\\', 0,	ESnormal }, // ST (ESC \) terminates string sequences
- 	{ '%', 0,	ESpercent },
- 	{ '#', 0,	EShash },
- 	{ '(', &VTerm::current_is_g0,	EScharset },
-@@ -69,6 +70,9 @@
- 
- 	// ESsquare
- 	{ '[', 0,	ESfunckey },
-+	{ '<' | ADDSAME(2), &VTerm::set_csi_prefix, ESkeep }, // CSI prefixes < = > (kitty keyboard)
-+	{ ':', 0,	ESignore }, // colon sub-parameters (ESC[38:5:...m)
-+	{ ' ' | ADDSAME(15), 0,	ESignore }, // intermediate bytes (ESC[2 q)
- 	{ '?', &VTerm::set_q_mode,	ESkeep },
- 	{ '0' | ADDSAME(9), &VTerm::param_digit,	ESkeep },
- 	{ ';', &VTerm::next_param,	ESkeep },
-@@ -100,7 +104,7 @@
- 	{ 'q', &VTerm::set_led, ESnormal },
- 	{ 'r', &VTerm::set_margins,	ESnormal },
- 	{ 's', &VTerm::save_cursor,	ESnormal },
--	{ 'u', &VTerm::restore_cursor,	ESnormal },
-+	{ 'u', &VTerm::csi_u,	ESnormal },
- 	{ '`', &VTerm::cursor_position_col,	ESnormal },
- 	{ ']', &VTerm::linux_specific, ESnormal },
- 	{ '}', &VTerm::fbterm_specific, ESnormal },
-@@ -133,4 +137,10 @@
- 
- 	// ESfunckey
- 	{ 0xFFFF },
-+
-+	// ESosc
-+	{ 0xFFFF },
-+
-+	// ESignore
-+	{ 0xFFFF },
- };
---- a/src/screen.cpp
-+++ b/src/screen.cpp
-@@ -197,7 +197,7 @@
- 	}
- }
- 
--void Screen::drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw)
-+void Screen::drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet)
- {
- 	u32 startx, fw = FW(1);
- 
-@@ -208,7 +208,7 @@
- 		if (*text == 0x20) {
- 			if (draw_text) {
- 				draw_text = false;
--				drawGlyphs(startx, y, fc, bc, startnum - num, starttext, startdw);
-+				drawGlyphs(startx, y, fc, bc, startnum - num, starttext, startdw, bgSet);
- 			}
- 
- 			if (!draw_space) {
-@@ -218,7 +218,7 @@
- 		} else {
- 			if (draw_space) {
- 				draw_space = false;
--				fillRect(startx, y, x - startx, FH(1), bc);
-+				fillRect(startx, y, x - startx, FH(1), bc, bgSet);
- 			}
- 
- 			if (!draw_text) {
-@@ -234,16 +234,16 @@
- 	}
- 
- 	if (draw_text) {
--		drawGlyphs(startx, y, fc, bc, startnum - num, starttext, startdw);
-+		drawGlyphs(startx, y, fc, bc, startnum - num, starttext, startdw, bgSet);
- 	} else if (draw_space) {
--		fillRect(startx, y, x - startx, FH(1), bc);
-+		fillRect(startx, y, x - startx, FH(1), bc, bgSet);
- 	}
- }
- 
--void Screen::drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw)
-+void Screen::drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet)
- {
- 	for (; num--; text++, dw++) {
--		drawGlyph(x, y, fc, bc, *text, *dw);
-+		drawGlyph(x, y, fc, bc, *text, *dw, bgSet);
- 		x += *dw ? FW(2) : FW(1);
- 	}
- }
-@@ -254,7 +254,7 @@
- 	else y += mOffsetCur;
- }
- 
--void Screen::fillRect(u32 x, u32 y, u32 w, u32 h, u8 color)
-+void Screen::fillRect(u32 x, u32 y, u32 w, u32 h, u8 color, bool bgSet)
- {
- 	if (x >= mWidth || y >= mHeight || !w || !h) return;
- 	if (x + w > mWidth) w = mWidth - x;
-@@ -265,11 +265,11 @@
- 
- 	for (; h--;) {
- 		if (mScrollType == YWrap && y > mOffsetMax) y -= mOffsetMax + 1;
--		(this->*fill)(x, y++, w, color);
-+		(this->*fill)(x, y++, w, color, bgSet);
- 	}
- }
- 
--void Screen::drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw)
-+void Screen::drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw, bool bgSet)
- {
- 	if (x >= mWidth || y >= mHeight) return;
- 
-@@ -279,7 +279,7 @@
- 
- 	Font::Glyph *glyph = (Font::Glyph *)Font::instance()->getGlyph(code);
- 	if (!glyph) {
--		fillRect(x, y, w, h, bc);
-+		fillRect(x, y, w, h, bc, bgSet);
- 		return;
- 	}
- 
-@@ -299,14 +299,14 @@
- 	if (y + top + height > mHeight) height = mHeight - (y + top);
- 	if (height < 0) height = 0;
- 
--	if (top) fillRect(x, y, w, top, bc);
--	if (left > 0) fillRect(x, y + top, left, height, bc);
-+	if (top) fillRect(x, y, w, top, bc, bgSet);
-+	if (left > 0) fillRect(x, y + top, left, height, bc, bgSet);
- 
- 	s32 right = width + left;
--	if (w > right) fillRect((s32)x + right, y + top, w - right, height, bc);
-+	if (w > right) fillRect((s32)x + right, y + top, w - right, height, bc, bgSet);
- 
- 	s32 bot = top + height;
--	if (h > bot) fillRect(x, y + bot, w, h - bot, bc);
-+	if (h > bot) fillRect(x, y + bot, w, h - bot, bc, bgSet);
- 
- 	x += left;
- 	y += top;
-@@ -331,7 +331,7 @@
- 	adjustOffset(x, y);
- 	for (; nheight--; y++, pixmap += glyph->pitch) {
- 		if ((mScrollType == YWrap) && y > mOffsetMax) y -= mOffsetMax + 1;
--		(this->*draw)(x, y, nwidth, fc, bc, pixmap);
-+		(this->*draw)(x, y, nwidth, fc, bc, pixmap, bgSet);
- 	}
- }
- 
---- a/src/screen.h
-+++ b/src/screen.h
-@@ -45,8 +45,8 @@
- 	void rotateRect(u32 &x, u32 &y, u32 &w, u32 &h);
- 	void rotatePoint(u32 w, u32 h, u32 &x, u32 &y);
- 
--	void drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw);
--	void fillRect(u32 x, u32 y, u32 w, u32 h, u8 color);
-+	void drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet = false);
-+	void fillRect(u32 x, u32 y, u32 w, u32 h, u8 color, bool bgSet = false);
- 
- 	bool move(u16 scol, u16 srow, u16 dcol, u16 drow, u16 w, u16 h);
- 	void setPalette(const Color *palette);
-@@ -77,26 +77,26 @@
- 	virtual const s8 *drvId() = 0;
- 
- 	void eraseMargin(bool top, u16 h);
--	void drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw);
--	void drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw);
-+	void drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet = false);
-+	void drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw, bool bgSet = false);
- 	void adjustOffset(u32 &x, u32 &y);
- 
- 	void initFillDraw();
- 	void endFillDraw();
- 
--	void fillX(u32 x, u32 y, u32 w, u8 color);
--	void fillXBg(u32 x, u32 y, u32 w, u8 color);
--	void draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
--	void draw15(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
--	void draw16(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
--	void draw32(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
--	void draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
--	void draw15Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
--	void draw16Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
--	void draw32Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
-+	void fillX(u32 x, u32 y, u32 w, u8 color, bool bgSet);
-+	void fillXBg(u32 x, u32 y, u32 w, u8 color, bool bgSet);
-+	void draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
-+	void draw15(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
-+	void draw16(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
-+	void draw32(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
-+	void draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
-+	void draw15Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
-+	void draw16Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
-+	void draw32Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
- 
--	typedef void (Screen::*fillFun)(u32 x, u32 y, u32 w, u8 color);
--	typedef void (Screen::*drawFun)(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
-+	typedef void (Screen::*fillFun)(u32 x, u32 y, u32 w, u8 color, bool bgSet);
-+	typedef void (Screen::*drawFun)(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
- 
- 	fillFun fill;
- 	drawFun draw;
---- a/src/screen_render.cpp
-+++ b/src/screen_render.cpp
-@@ -109,7 +109,7 @@
- 	if (bgimage_mem) delete[] bgimage_mem;
- }
- 
--void Screen::fillX(u32 x, u32 y, u32 w, u8 color)
-+void Screen::fillX(u32 x, u32 y, u32 w, u8 color, bool bgSet)
- {
- 	u32 c = fillColors[color];
- 	u8 *dst = mVMemBase + y * mBytesPerLine + x * bytes_per_pixel;
-@@ -129,17 +129,17 @@
- 	}
- }
- 
--void Screen::fillXBg(u32 x, u32 y, u32 w, u8 color)
-+void Screen::fillXBg(u32 x, u32 y, u32 w, u8 color, bool bgSet)
- {
--	if (color == bgcolor) {
-+	if (color == bgcolor && !bgSet) {
- 		u32 offset = y * mBytesPerLine + x * bytes_per_pixel;
- 		memcpy(mVMemBase + offset, bgimage_mem + offset, w * bytes_per_pixel);
- 	} else {
--		fillX(x, y, w, color);
-+		fillX(x, y, w, color, bgSet);
- 	}
- }
- 
--void Screen::draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap)
-+void Screen::draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet)
- {
- 	bool isfg;
- 	u8 *dst = mVMemBase + y * mBytesPerLine + x * bytes_per_pixel;
-@@ -150,10 +150,10 @@
- 	}
- }
- 
--void Screen::draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap)
-+void Screen::draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet)
- {
--	if (bc != bgcolor) {
--		draw8(x, y, w, fc, bc, pixmap);
-+	if (bc != bgcolor || bgSet) {
-+		draw8(x, y, w, fc, bc, pixmap, bgSet);
- 		return;
- 	}
- 
-@@ -170,7 +170,7 @@
- 
- #define drawX(bits, lred, lgreen, lblue, type, fbwrite) \
-  \
--void Screen::draw##bits(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap) \
-+void Screen::draw##bits(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet) \
- { \
- 	u8 red, green, blue; \
- 	u8 pixel; \
-@@ -199,10 +199,10 @@
- 
- #define drawXBg(bits, lred, lgreen, lblue, type, fbwrite) \
-  \
--void Screen::draw##bits##Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap) \
-+void Screen::draw##bits##Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet) \
- { \
--	if (bc != bgcolor) { \
--		draw##bits(x, y, w, fc, bc, pixmap); \
-+	if (bc != bgcolor || bgSet) { \
-+		draw##bits(x, y, w, fc, bc, pixmap, bgSet); \
- 		return; \
- 	} \
-  \
---- a/src/kittykey.cpp
-+++ b/src/kittykey.cpp
+diff -ruN a/src/kittykey.cpp b/src/kittykey.cpp
+--- a/src/kittykey.cpp	1970-01-01 00:00:00.000000000 +0000
++++ b/src/kittykey.cpp	2026-11-15 05:42:34.391213304 +0000
 @@ -0,0 +1,648 @@
 +/*
 + *   kittykey.cpp - kitty keyboard protocol encoder (see kittykey.h).
@@ -1812,8 +982,9 @@
 +	}
 +	return 0;
 +}
---- a/src/kittykey.h
-+++ b/src/kittykey.h
+diff -ruN a/src/kittykey.h b/src/kittykey.h
+--- a/src/kittykey.h	1970-01-01 00:00:00.000000000 +0000
++++ b/src/kittykey.h	2026-11-15 05:42:34.391213304 +0000
 @@ -0,0 +1,75 @@
 +/*
 + *   kittykey.h - kitty keyboard protocol encoder for FbTerm.
@@ -1890,3 +1061,887 @@
 +};
 +
 +#endif
+diff -ruN a/src/lib/vterm.cpp b/src/lib/vterm.cpp
+--- a/src/lib/vterm.cpp	2026-11-15 05:41:04.271213304 +0000
++++ b/src/lib/vterm.cpp	2026-11-15 05:42:34.391213304 +0000
+@@ -25,7 +25,7 @@
+ #define MIN(a, b) ((a) < (b) ? (a) : (b))
+ #define MAX(a, b) ((a) > (b) ? (a) : (b))
+ 
+-VTerm::CharAttr VTerm::default_char_attr = { 0, 0, 1, 0, 0, 0, 0, VTerm::CharAttr::Single };
++VTerm::CharAttr VTerm::default_char_attr = { 0, 0, 1, 0, 0, 0, 0, 0, VTerm::CharAttr::Single };
+ 
+ VTerm::CharAttr VTerm::normal_char_attr()
+ {
+@@ -50,6 +50,7 @@
+ 
+ 	a.fcolor = char_attr.fcolor;
+ 	a.bcolor = char_attr.bcolor;
++	a.bg_set = char_attr.bg_set;
+ 	a.blink = char_attr.blink;
+ 
+ 	return a;
+@@ -112,6 +113,12 @@
+ 	history_save_line = 0;
+ 	visual_start_line = 0;
+ 
++	alt_active = false;
++	saved_text = 0;
++	saved_attrs = 0;
++	saved_linenumbers = 0;
++	saved_width = saved_height = 0;
++
+ 	reset();
+ 	resize(w, h);
+ }
+@@ -122,6 +129,9 @@
+ 
+ 	delete[] text;
+ 	delete[] attrs;
++	delete[] saved_text;
++	delete[] saved_attrs;
++	delete[] saved_linenumbers;
+ 	delete[] tab_stops;
+ 	delete[] linenumbers;
+ 	delete[] dirty_startx;
+@@ -138,6 +148,8 @@
+ 	charset = g0_charset;
+ 
+ 	esc_state = ESnormal;
++	alt_active = false;
++	memset(mKitty, 0, sizeof(mKitty));
+ 
+ 	pending_scroll = 0;
+ 	scroll_top = 0;
+@@ -469,6 +481,42 @@
+ 
+ void VTerm::do_control_char()
+ {
++	/* A CSI sequence FbTerm does not implement (private prefix,
++	 * colon sub-parameters, intermediate bytes: kitty keyboard
++	 * ESC[=5u, fish's ESC[>4;1m, DECSCUSR ESC[2 q...) is swallowed
++	 * whole up to its final byte (0x40-0x7e) instead of printing
++	 * the parameter bytes as text. C0 controls (ESC, CAN...) fall
++	 * through to the normal dispatch and abort the sequence. */
++	if (esc_state == ESignore && cur_char >= 0x20) {
++		if (cur_char >= 0x40 && cur_char <= 0x7e) esc_state = ESnormal;
++		return;
++	}
++
++	/* Inside an OSC sequence (ESC ] ...), swallow every character
++	 * until a terminator arrives: BEL, CAN, SUB, or ST (ESC \).
++	 * The palette commands (ESC ] P... / ESC ] R) are the only OSC
++	 * sequences FbTerm implements; they are handed over to the
++	 * legacy ESnonstd state. Everything else (OSC 8 hyperlinks,
++	 * OSC 52 clipboard data, window titles, ...) is silently
++	 * dropped, as other terminals do with unknown OSC sequences. */
++	if (esc_state == ESosc) {
++		if (cur_char == 0x07 || cur_char == 0x18 || cur_char == 0x1A) {
++			esc_state = ESnormal;
++			return;
++		}
++		if (cur_char != 0x1B) {
++			if (osc_first) {
++				osc_first = false;
++				if (cur_char == 'P' || cur_char == 'R')
++					esc_state = ESnonstd;
++				else
++					return;
++			} else {
++				return;
++			}
++		}
++	}
++
+ 	u8 index = (cur_char < MAX_CONTROL_CODE ? control_map[cur_char] : 0);
+ 	const Sequence *seq = control_sequences + index;
+ 
+@@ -476,6 +524,16 @@
+ 		seq = escape_sequences + (cur_char < MAX_ESCAPE_CODE ? escape_map[esc_state][cur_char] : 0);
+ 	}
+ 
++	/* An unknown privately-prefixed CSI (CSI > 4;1m modifyOtherKeys,
++	 * CSI = ... with a final we do not implement...) is swallowed
++	 * whole, as before; only CSI ... u is handled (kitty keyboard).
++	 * SCO restore-cursor (plain CSI u) is unaffected. */
++	if (esc_state == ESsquare && csi_prefix && seq->next == ESnormal && cur_char != 'u') {
++		csi_prefix = 0;
++		esc_state = ESnormal;
++		return;
++	}
++
+ 	if (seq->action) (this->*(seq->action))();
+ 	if (seq->next != ESkeep) esc_state = seq->next;
+ }
+@@ -608,7 +666,7 @@
+ 	if (num > mx) num = mx;
+ 	if (-num > mx) num = -mx;
+ 
+-	if (start_y == 0 && num > 0) {
++	if (start_y == 0 && num > 0 && !alt_active) {
+ 		history_scroll(num);
+ 	}
+ 
+@@ -778,6 +836,7 @@
+ 
+ void VTerm::historyDisplay(bool absolute, s32 num)
+ {
++	if (alt_active) return;
+ 	if (!history_lines || (absolute && num == (s32)visual_start_line) || (!absolute && !num)) return;
+ 
+ 	u32 bak_line = visual_start_line;
+diff -ruN a/src/lib/vterm.h b/src/lib/vterm.h
+--- a/src/lib/vterm.h	2010-10-18 08:20:11.000000000 +0000
++++ b/src/lib/vterm.h	2026-11-15 05:42:34.391213304 +0000
+@@ -32,7 +32,7 @@
+ 
+ 		bool operator != (const CharAttr a) {
+ 			return fcolor != a.fcolor || bcolor != a.bcolor || intensity != a.intensity
+-				|| italic != a.italic || underline != a.underline || blink != a.blink || reverse != a.reverse;
++				|| italic != a.italic || underline != a.underline || blink != a.blink || reverse != a.reverse || bg_set != a.bg_set;
+ 		}
+ 
+ 		u16 fcolor : 8;
+@@ -42,6 +42,7 @@
+ 		u16 underline : 1;
+ 		u16 blink : 1;
+ 		u16 reverse : 1;
++		u16 bg_set : 1; // background set explicitly (paint it even if it is colour 0)
+ 		u16 type : 2;
+ 	};
+ 
+@@ -61,6 +62,7 @@
+ 		AutoRepeatKey = 16,
+ 		ApplicKeypad = 32,
+ 		CRWithLF = 64,
++		KittyKeyboard = 128,
+ 		AllModes = 0xff,
+ 	} ModeType;
+ 
+@@ -77,6 +79,8 @@
+ 
+ 	u16 w() { return width; }
+ 	u16 h() { return height; }
++	// kitty keyboard protocol: current flags of the active screen
++	u8 kittyFlags() { return mKitty[alt_active ? 1 : 0].flags; }
+ 	void historyDisplay(bool absolute, s32 num);
+ 	u16 mode(ModeType type);
+ 	void resize(u16 w, u16 h);
+@@ -100,6 +104,19 @@
+ 	virtual void requestUpdate(u16 x, u16 y, u16 w, u16 h);
+ 
+ private:
++	// kitty keyboard protocol (CSI = / > / < / ? ... u)
++	struct KittyState {
++		u8 flags;
++		u8 stack[16];
++		u8 sp;
++	};
++	KittyState mKitty[2]; // 0 = main screen, 1 = alternate screen
++	u8 csi_prefix; // '<', '=' or '>' seen in this CSI, 0 = none
++	KittyState &kittyState() { return mKitty[alt_active ? 1 : 0]; }
++	void kittyChanged();
++	void set_csi_prefix();
++	void csi_u();
++
+ 	// utility functions
+ 	void do_normal_char();
+ 	void do_control_char();
+@@ -167,6 +184,10 @@
+ 	u32 translate_char(u32);
+ 	void set_cursor_type();
+ 	void linux_specific();
++	void begin_osc();
++	void set_alt_screen(bool enter, bool with_cursor);
++	void save_screen();
++	void restore_screen();
+ 	void begin_set_palette();
+ 	void set_palette();
+ 	void reset_palette();
+@@ -185,7 +206,7 @@
+ 	static bool init_ambiguous_wide();
+ 
+ 	typedef enum {
+-		ESnormal = 0, ESesc, ESsquare, ESnonstd, ESpercent, EScharset, EShash, ESfunckey, ESkeep
++		ESnormal = 0, ESesc, ESsquare, ESnonstd, ESpercent, EScharset, EShash, ESfunckey, ESosc, ESignore, ESkeep
+ 	} EscapeState;
+ 
+ 	EscapeState esc_state;
+@@ -266,6 +287,15 @@
+ 	#define NPAR 16
+ 	u16 npar, param[NPAR];
+ 	bool q_mode, palette_mode;
++	bool osc_first; // true until the first char of an OSC sequence is seen
++
++	// alternate screen (DECSET 47/1047/1048/1049): snapshot of the
++	// main screen, restored when the alternate screen is left
++	bool alt_active;
++	u16 *saved_text;
++	CharAttr *saved_attrs;
++	u16 *saved_linenumbers;
++	u16 saved_width, saved_height;
+ 
+ 	//history
+ 	static u16 history_lines;
+diff -ruN a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
+--- a/src/lib/vterm_action.cpp	2010-10-18 08:20:11.000000000 +0000
++++ b/src/lib/vterm_action.cpp	2026-11-15 05:42:34.391213304 +0000
+@@ -92,10 +92,64 @@
+ {
+ 	q_mode = 0;
+ 	palette_mode = 0;
++	csi_prefix = 0;
+ 	npar = 0;
+ 	memset(param, 0, sizeof(param));
+ }
+ 
++void VTerm::set_csi_prefix()
++{
++	csi_prefix = cur_char;
++}
++
++void VTerm::kittyChanged()
++{
++	modeChanged(KittyKeyboard);
++}
++
++// CSI = flags ; mode u (set), CSI > flags u (push), CSI < n u (pop),
++// CSI ? u (query). Without prefix or '?', CSI u is SCO restore cursor.
++void VTerm::csi_u()
++{
++	KittyState &st = kittyState();
++
++	if (csi_prefix == '=') {
++		u8 mode = (npar >= 1 && param[1]) ? param[1] : 1;
++		u8 flags = param[0] & 31;
++		if (mode == 2) st.flags |= flags;
++		else if (mode == 3) st.flags &= ~flags;
++		else st.flags = flags;
++		kittyChanged();
++	} else if (csi_prefix == '>') {
++		if (st.sp < sizeof(st.stack) / sizeof(st.stack[0]))
++			st.stack[st.sp++] = st.flags;
++		st.flags = param[0] & 31;
++		kittyChanged();
++	} else if (csi_prefix == '<') {
++		u16 n = param[0] ? param[0] : 1;
++		while (n--) {
++			if (!st.sp) { // popping an empty stack resets all flags
++				st.flags = 0;
++				break;
++			}
++			st.flags = st.stack[--st.sp];
++		}
++		kittyChanged();
++	} else if (q_mode) {
++		s8 str[16];
++		snprintf(str, sizeof(str), "\e[?%du", st.flags);
++		sendBack(str);
++	} else {
++		restore_cursor();
++	}
++}
++
++void VTerm::begin_osc()
++{
++	clear_param();
++	osc_first = true;
++}
++
+ void VTerm::save_cursor()
+ {
+ 	s_g0_charset = g0_charset;
+@@ -118,6 +172,97 @@
+ 	move_cursor(s_cursor_x, s_cursor_y);
+ }
+ 
++// Alternate screen (DECSET 47/1047/1048/1049), as used by vim, less,
++// htop, mc and ncurses (smcup/rmcup): entering saves the main screen
++// and switches to a fresh, cleared one; leaving restores the main
++// screen (and, for 1049/1048, the cursor and rendition saved on
++// entry). The history buffer is never touched: lines scrolled off
++// inside the alternate screen are lost, like in xterm.
++void VTerm::set_alt_screen(bool enter, bool with_cursor)
++{
++	if (enter == alt_active) return;
++
++	// A pending fast scroll belongs to the screen being left;
++	// dropping it is always safe (everything is redrawn below).
++	pending_scroll = 0;
++
++	if (enter) {
++		if (with_cursor) save_cursor();
++		save_screen();
++
++		for (u16 i = 0; i < max_height; i++) {
++			linenumbers[i] = history_lines + i;
++		}
++		visual_start_line = total_history_lines();
++		scroll_top = 0;
++		scroll_bot = height - 1;
++		alt_active = true;
++		clear_area(0, 0, width - 1, height - 1);
++		move_cursor(0, 0);
++	} else {
++		restore_screen();
++		alt_active = false;
++		scroll_top = 0;
++		scroll_bot = height - 1;
++		if (with_cursor) restore_cursor();
++	}
++
++	// main and alternate screens have independent kitty flag stacks
++	kittyChanged();
++}
++
++void VTerm::save_screen()
++{
++	delete[] saved_text;
++	delete[] saved_attrs;
++	delete[] saved_linenumbers;
++
++	saved_text = new u16[max_width * max_height];
++	saved_attrs = new CharAttr[max_width * max_height];
++	saved_linenumbers = new u16[max_height];
++	saved_width = max_width;
++	saved_height = max_height;
++
++	memcpy(saved_linenumbers, linenumbers, sizeof(u16) * max_height);
++
++	for (u16 y = 0; y < height; y++) {
++		u32 src = linenumbers[y] * max_width;
++		u32 dst = y * max_width;
++		memcpy(&saved_text[dst], &text[src], sizeof(u16) * width);
++		memcpy(&saved_attrs[dst], &attrs[src], sizeof(CharAttr) * width);
++		for (u16 x = width; x < max_width; x++) {
++			saved_text[dst + x] = ' ';
++			saved_attrs[dst + x] = default_char_attr;
++		}
++	}
++}
++
++void VTerm::restore_screen()
++{
++	if (!saved_text || !saved_linenumbers) return;
++
++	u16 copy_lines = (height < saved_height) ? height : saved_height;
++	u16 copy_width = (width < saved_width) ? width : saved_width;
++	u16 copy_map = (max_height < saved_height) ? max_height : saved_height;
++
++	memcpy(linenumbers, saved_linenumbers, sizeof(u16) * copy_map);
++	for (u16 i = copy_map; i < max_height; i++) {
++		linenumbers[i] = history_lines + i;
++	}
++
++	// Blank everything first: rows or columns the terminal grew
++	// while in the alternate screen start out empty.
++	clear_area(0, 0, width - 1, height - 1);
++
++	for (u16 y = 0; y < copy_lines; y++) {
++		u32 dst = linenumbers[y] * max_width;
++		u32 src = y * saved_width;
++		memcpy(&text[dst], &saved_text[src], sizeof(u16) * copy_width);
++		memcpy(&attrs[dst], &saved_attrs[src], sizeof(CharAttr) * copy_width);
++		changed_line(y, 0, width - 1);
++	}
++}
++
+ void VTerm::next_line()
+ {
+ 	lf();
+@@ -399,54 +544,69 @@
+ 
+ void VTerm::enable_mode(bool enable)
+ {
+-	switch (param[0] + 1000 * q_mode) {
+-	case 3:
+-		mode_flags.display_ctrl = enable;
+-		break;
+-	case 4:
+-		mode_flags.insert_mode = enable;
+-		break;
+-	case 20: // auto echo cr with lf
+-		mode_flags.crlf = enable;
+-		modeChanged(CRWithLF);
+-		break;
+-	case 1001 :
+-		mode_flags.cursorkey_esco = enable;
+-		modeChanged(CursorKeyEscO);
+-		break;
+-	case 1003 :
+-		mode_flags.col_132 = enable;
+-		break;
+-	case 1005 :
+-		mode_flags.inverse_screen = enable;
+-		for (u16 i = 0; i < height; i++) {
+-			changed_line(i, 0, width - 1);
++	// A sequence can set several modes at once (ESC [ ? 1049 ; 25 h);
++	// handle every parameter, not just the first one.
++	for (u16 n = 0; n <= npar; n++) {
++		switch (param[n] + 1000 * q_mode) {
++		case 3:
++			mode_flags.display_ctrl = enable;
++			break;
++		case 4:
++			mode_flags.insert_mode = enable;
++			break;
++		case 20: // auto echo cr with lf
++			mode_flags.crlf = enable;
++			modeChanged(CRWithLF);
++			break;
++		case 1001 :
++			mode_flags.cursorkey_esco = enable;
++			modeChanged(CursorKeyEscO);
++			break;
++		case 1003 :
++			mode_flags.col_132 = enable;
++			break;
++		case 1005 :
++			mode_flags.inverse_screen = enable;
++			for (u16 i = 0; i < height; i++) {
++				changed_line(i, 0, width - 1);
++			}
++			break;
++		case 1006 :
++			mode_flags.cursor_relative = enable;
++			break;
++		case 1007 :
++			mode_flags.auto_wrap = enable;
++			break;
++		case 1008 :
++			mode_flags.autorepeat_key = enable;
++			modeChanged(AutoRepeatKey);
++			break;
++		case 1009 :
++			mode_flags.mouse_report = (enable ? MouseX10 : MouseNone);
++			modeChanged(MouseReport);
++			break;
++		case 1025 :
++			mode_flags.cursor_visible = enable;
++			modeChanged(CursorVisible);
++			break;
++		case 1047 : // DECSET 47: use alternate screen buffer
++		case 2047 : // DECSET 1047: use alternate screen buffer
++			set_alt_screen(enable, false);
++			break;
++		case 2048 : // DECSET 1048: save/restore cursor
++			if (enable) save_cursor();
++			else restore_cursor();
++			break;
++		case 2049 : // DECSET 1049: save cursor + alternate screen
++			set_alt_screen(enable, true);
++			break;
++		case 2000 :
++			mode_flags.mouse_report = (enable ? MouseX11 : MouseNone);
++			modeChanged(MouseReport);
++			break;
++		default:
++			break;
+ 		}
+-		break;
+-	case 1006 :
+-		mode_flags.cursor_relative = enable;
+-		break;
+-	case 1007 :
+-		mode_flags.auto_wrap = enable;
+-		break;
+-	case 1008 :
+-		mode_flags.autorepeat_key = enable;
+-		modeChanged(AutoRepeatKey);
+-		break;
+-	case 1009 :
+-		mode_flags.mouse_report = (enable ? MouseX10 : MouseNone);
+-		modeChanged(MouseReport);
+-		break;
+-	case 1025 :
+-		mode_flags.cursor_visible = enable;
+-		modeChanged(CursorVisible);
+-		break;
+-	case 2000 :
+-		mode_flags.mouse_report = (enable ? MouseX11 : MouseNone);
+-		modeChanged(MouseReport);
+-		break;
+-	default:
+-		break;
+ 	}
+ }
+ 
+@@ -460,6 +620,25 @@
+ 	enable_mode(false);
+ }
+ 
++/* Map a 24-bit RGB colour onto the xterm 256-colour palette
++ * (6x6x6 colour cube; grey ramp for greys). FbTerm has no truecolor
++ * framebuffer mode, so SGR 38;2/48;2 colours are approximated. */
++static u8 rgb_to_256(u16 r, u16 g, u16 b)
++{
++	if (r > 255) r = 255;
++	if (g > 255) g = 255;
++	if (b > 255) b = 255;
++
++	if (r == g && g == b) {
++		if (r < 8) return 16;
++		if (r > 248) return 231;
++		return 232 + (r - 8) * 24 / 247;
++	}
++
++	return 16 + 36 * ((r * 5 + 127) / 255)
++		+ 6 * ((g * 5 + 127) / 255) + ((b * 5 + 127) / 255);
++}
++
+ void VTerm::set_display_attr()
+ {
+ 	for (u16 n = 0; n <= npar; n++) {
+@@ -520,8 +699,21 @@
+ 			char_attr.fcolor = param[n] % 10;
+ 			break;
+ 		case 38:
+-			char_attr.fcolor = cur_fcolor;
+-			char_attr.underline = true;
++			if (n + 2 <= npar && param[n + 1] == 5) {
++				// SGR 38;5;<n>: 256-colour foreground
++				char_attr.fcolor = param[n + 2];
++				n += 2;
++			} else if (n + 4 <= npar && param[n + 1] == 2) {
++				// SGR 38;2;<r>;<g>;<b>: truecolor (approximated)
++				char_attr.fcolor = rgb_to_256(param[n + 2], param[n + 3], param[n + 4]);
++				n += 4;
++			} else if (n < npar && (param[n + 1] == 5 || param[n + 1] == 2)) {
++				// truncated extended colour sequence: ignore it
++				n = npar;
++			} else {
++				char_attr.fcolor = cur_fcolor;
++				char_attr.underline = true;
++			}
+ 			break;
+ 		case 39:
+ 			char_attr.fcolor = cur_fcolor;
+@@ -529,9 +721,36 @@
+ 			break;
+ 		case 40 ... 47:
+ 			char_attr.bcolor = param[n] % 10;
++			char_attr.bg_set = true;
++			break;
++		case 48:
++			if (n + 2 <= npar && param[n + 1] == 5) {
++				// SGR 48;5;<n>: 256-colour background
++				char_attr.bcolor = param[n + 2];
++				char_attr.bg_set = true;
++				n += 2;
++			} else if (n + 4 <= npar && param[n + 1] == 2) {
++				// SGR 48;2;<r>;<g>;<b>: truecolor (approximated)
++				char_attr.bcolor = rgb_to_256(param[n + 2], param[n + 3], param[n + 4]);
++				char_attr.bg_set = true;
++				n += 4;
++			} else if (n < npar && (param[n + 1] == 5 || param[n + 1] == 2)) {
++				// truncated extended colour sequence: ignore it
++				n = npar;
++			}
+ 			break;
+ 		case 49:
+ 			char_attr.bcolor = cur_bcolor;
++			char_attr.bg_set = false;
++			break;
++		case 90 ... 97:
++			// bright foreground colours
++			char_attr.fcolor = param[n] - 90 + 8;
++			break;
++		case 100 ... 107:
++			// bright background colours
++			char_attr.bcolor = param[n] - 100 + 8;
++			char_attr.bg_set = true;
+ 			break;
+ 		default :
+ 			break;
+@@ -689,7 +908,10 @@
+ 		break;
+ 
+ 	case 2:
+-		if (npar == 1) char_attr.bcolor = param[1];
++		if (npar == 1) {
++			char_attr.bcolor = param[1];
++			char_attr.bg_set = true;
++		}
+ 		break;
+ 
+ 	case 3:
+diff -ruN a/src/lib/vterm_states.cpp b/src/lib/vterm_states.cpp
+--- a/src/lib/vterm_states.cpp	2026-11-15 05:41:04.271213304 +0000
++++ b/src/lib/vterm_states.cpp	2026-11-15 05:42:34.391213304 +0000
+@@ -50,7 +50,8 @@
+ 
+ 	// ESesc
+ 	{ '[', &VTerm::clear_param,	ESsquare },
+-	{ ']', &VTerm::clear_param,	ESnonstd },
++	{ ']', &VTerm::begin_osc,	ESosc },
++	{ '\\', 0,	ESnormal }, // ST (ESC \) terminates string sequences
+ 	{ '%', 0,	ESpercent },
+ 	{ '#', 0,	EShash },
+ 	{ '(', &VTerm::current_is_g0,	EScharset },
+@@ -69,6 +70,9 @@
+ 
+ 	// ESsquare
+ 	{ '[', 0,	ESfunckey },
++	{ '<' | ADDSAME(2), &VTerm::set_csi_prefix, ESkeep }, // CSI prefixes < = > (kitty keyboard)
++	{ ':', 0,	ESignore }, // colon sub-parameters (ESC[38:5:...m)
++	{ ' ' | ADDSAME(15), 0,	ESignore }, // intermediate bytes (ESC[2 q)
+ 	{ '?', &VTerm::set_q_mode,	ESkeep },
+ 	{ '0' | ADDSAME(9), &VTerm::param_digit,	ESkeep },
+ 	{ ';', &VTerm::next_param,	ESkeep },
+@@ -100,7 +104,7 @@
+ 	{ 'q', &VTerm::set_led, ESnormal },
+ 	{ 'r', &VTerm::set_margins,	ESnormal },
+ 	{ 's', &VTerm::save_cursor,	ESnormal },
+-	{ 'u', &VTerm::restore_cursor,	ESnormal },
++	{ 'u', &VTerm::csi_u,	ESnormal },
+ 	{ '`', &VTerm::cursor_position_col,	ESnormal },
+ 	{ ']', &VTerm::linux_specific, ESnormal },
+ 	{ '}', &VTerm::fbterm_specific, ESnormal },
+@@ -133,4 +137,10 @@
+ 
+ 	// ESfunckey
+ 	{ 0xFFFF },
++
++	// ESosc
++	{ 0xFFFF },
++
++	// ESignore
++	{ 0xFFFF },
+ };
+diff -ruN a/src/screen.cpp b/src/screen.cpp
+--- a/src/screen.cpp	2010-10-18 08:20:11.000000000 +0000
++++ b/src/screen.cpp	2026-11-15 05:42:34.391213304 +0000
+@@ -197,7 +197,7 @@
+ 	}
+ }
+ 
+-void Screen::drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw)
++void Screen::drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet)
+ {
+ 	u32 startx, fw = FW(1);
+ 
+@@ -208,7 +208,7 @@
+ 		if (*text == 0x20) {
+ 			if (draw_text) {
+ 				draw_text = false;
+-				drawGlyphs(startx, y, fc, bc, startnum - num, starttext, startdw);
++				drawGlyphs(startx, y, fc, bc, startnum - num, starttext, startdw, bgSet);
+ 			}
+ 
+ 			if (!draw_space) {
+@@ -218,7 +218,7 @@
+ 		} else {
+ 			if (draw_space) {
+ 				draw_space = false;
+-				fillRect(startx, y, x - startx, FH(1), bc);
++				fillRect(startx, y, x - startx, FH(1), bc, bgSet);
+ 			}
+ 
+ 			if (!draw_text) {
+@@ -234,16 +234,16 @@
+ 	}
+ 
+ 	if (draw_text) {
+-		drawGlyphs(startx, y, fc, bc, startnum - num, starttext, startdw);
++		drawGlyphs(startx, y, fc, bc, startnum - num, starttext, startdw, bgSet);
+ 	} else if (draw_space) {
+-		fillRect(startx, y, x - startx, FH(1), bc);
++		fillRect(startx, y, x - startx, FH(1), bc, bgSet);
+ 	}
+ }
+ 
+-void Screen::drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw)
++void Screen::drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet)
+ {
+ 	for (; num--; text++, dw++) {
+-		drawGlyph(x, y, fc, bc, *text, *dw);
++		drawGlyph(x, y, fc, bc, *text, *dw, bgSet);
+ 		x += *dw ? FW(2) : FW(1);
+ 	}
+ }
+@@ -254,7 +254,7 @@
+ 	else y += mOffsetCur;
+ }
+ 
+-void Screen::fillRect(u32 x, u32 y, u32 w, u32 h, u8 color)
++void Screen::fillRect(u32 x, u32 y, u32 w, u32 h, u8 color, bool bgSet)
+ {
+ 	if (x >= mWidth || y >= mHeight || !w || !h) return;
+ 	if (x + w > mWidth) w = mWidth - x;
+@@ -265,11 +265,11 @@
+ 
+ 	for (; h--;) {
+ 		if (mScrollType == YWrap && y > mOffsetMax) y -= mOffsetMax + 1;
+-		(this->*fill)(x, y++, w, color);
++		(this->*fill)(x, y++, w, color, bgSet);
+ 	}
+ }
+ 
+-void Screen::drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw)
++void Screen::drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw, bool bgSet)
+ {
+ 	if (x >= mWidth || y >= mHeight) return;
+ 
+@@ -279,7 +279,7 @@
+ 
+ 	Font::Glyph *glyph = (Font::Glyph *)Font::instance()->getGlyph(code);
+ 	if (!glyph) {
+-		fillRect(x, y, w, h, bc);
++		fillRect(x, y, w, h, bc, bgSet);
+ 		return;
+ 	}
+ 
+@@ -299,14 +299,14 @@
+ 	if (y + top + height > mHeight) height = mHeight - (y + top);
+ 	if (height < 0) height = 0;
+ 
+-	if (top) fillRect(x, y, w, top, bc);
+-	if (left > 0) fillRect(x, y + top, left, height, bc);
++	if (top) fillRect(x, y, w, top, bc, bgSet);
++	if (left > 0) fillRect(x, y + top, left, height, bc, bgSet);
+ 
+ 	s32 right = width + left;
+-	if (w > right) fillRect((s32)x + right, y + top, w - right, height, bc);
++	if (w > right) fillRect((s32)x + right, y + top, w - right, height, bc, bgSet);
+ 
+ 	s32 bot = top + height;
+-	if (h > bot) fillRect(x, y + bot, w, h - bot, bc);
++	if (h > bot) fillRect(x, y + bot, w, h - bot, bc, bgSet);
+ 
+ 	x += left;
+ 	y += top;
+@@ -331,7 +331,7 @@
+ 	adjustOffset(x, y);
+ 	for (; nheight--; y++, pixmap += glyph->pitch) {
+ 		if ((mScrollType == YWrap) && y > mOffsetMax) y -= mOffsetMax + 1;
+-		(this->*draw)(x, y, nwidth, fc, bc, pixmap);
++		(this->*draw)(x, y, nwidth, fc, bc, pixmap, bgSet);
+ 	}
+ }
+ 
+diff -ruN a/src/screen.h b/src/screen.h
+--- a/src/screen.h	2010-10-18 08:20:11.000000000 +0000
++++ b/src/screen.h	2026-11-15 05:42:34.391213304 +0000
+@@ -45,8 +45,8 @@
+ 	void rotateRect(u32 &x, u32 &y, u32 &w, u32 &h);
+ 	void rotatePoint(u32 w, u32 h, u32 &x, u32 &y);
+ 
+-	void drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw);
+-	void fillRect(u32 x, u32 y, u32 w, u32 h, u8 color);
++	void drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet = false);
++	void fillRect(u32 x, u32 y, u32 w, u32 h, u8 color, bool bgSet = false);
+ 
+ 	bool move(u16 scol, u16 srow, u16 dcol, u16 drow, u16 w, u16 h);
+ 	void setPalette(const Color *palette);
+@@ -77,26 +77,26 @@
+ 	virtual const s8 *drvId() = 0;
+ 
+ 	void eraseMargin(bool top, u16 h);
+-	void drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw);
+-	void drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw);
++	void drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet = false);
++	void drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw, bool bgSet = false);
+ 	void adjustOffset(u32 &x, u32 &y);
+ 
+ 	void initFillDraw();
+ 	void endFillDraw();
+ 
+-	void fillX(u32 x, u32 y, u32 w, u8 color);
+-	void fillXBg(u32 x, u32 y, u32 w, u8 color);
+-	void draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw15(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw16(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw32(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw15Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw16Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw32Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
++	void fillX(u32 x, u32 y, u32 w, u8 color, bool bgSet);
++	void fillXBg(u32 x, u32 y, u32 w, u8 color, bool bgSet);
++	void draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw15(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw16(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw32(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw15Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw16Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw32Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
+ 
+-	typedef void (Screen::*fillFun)(u32 x, u32 y, u32 w, u8 color);
+-	typedef void (Screen::*drawFun)(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
++	typedef void (Screen::*fillFun)(u32 x, u32 y, u32 w, u8 color, bool bgSet);
++	typedef void (Screen::*drawFun)(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
+ 
+ 	fillFun fill;
+ 	drawFun draw;
+diff -ruN a/src/screen_render.cpp b/src/screen_render.cpp
+--- a/src/screen_render.cpp	2010-10-18 08:20:11.000000000 +0000
++++ b/src/screen_render.cpp	2026-11-15 05:42:34.391213304 +0000
+@@ -109,7 +109,7 @@
+ 	if (bgimage_mem) delete[] bgimage_mem;
+ }
+ 
+-void Screen::fillX(u32 x, u32 y, u32 w, u8 color)
++void Screen::fillX(u32 x, u32 y, u32 w, u8 color, bool bgSet)
+ {
+ 	u32 c = fillColors[color];
+ 	u8 *dst = mVMemBase + y * mBytesPerLine + x * bytes_per_pixel;
+@@ -129,17 +129,17 @@
+ 	}
+ }
+ 
+-void Screen::fillXBg(u32 x, u32 y, u32 w, u8 color)
++void Screen::fillXBg(u32 x, u32 y, u32 w, u8 color, bool bgSet)
+ {
+-	if (color == bgcolor) {
++	if (color == bgcolor && !bgSet) {
+ 		u32 offset = y * mBytesPerLine + x * bytes_per_pixel;
+ 		memcpy(mVMemBase + offset, bgimage_mem + offset, w * bytes_per_pixel);
+ 	} else {
+-		fillX(x, y, w, color);
++		fillX(x, y, w, color, bgSet);
+ 	}
+ }
+ 
+-void Screen::draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap)
++void Screen::draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet)
+ {
+ 	bool isfg;
+ 	u8 *dst = mVMemBase + y * mBytesPerLine + x * bytes_per_pixel;
+@@ -150,10 +150,10 @@
+ 	}
+ }
+ 
+-void Screen::draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap)
++void Screen::draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet)
+ {
+-	if (bc != bgcolor) {
+-		draw8(x, y, w, fc, bc, pixmap);
++	if (bc != bgcolor || bgSet) {
++		draw8(x, y, w, fc, bc, pixmap, bgSet);
+ 		return;
+ 	}
+ 
+@@ -170,7 +170,7 @@
+ 
+ #define drawX(bits, lred, lgreen, lblue, type, fbwrite) \
+  \
+-void Screen::draw##bits(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap) \
++void Screen::draw##bits(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet) \
+ { \
+ 	u8 red, green, blue; \
+ 	u8 pixel; \
+@@ -199,10 +199,10 @@
+ 
+ #define drawXBg(bits, lred, lgreen, lblue, type, fbwrite) \
+  \
+-void Screen::draw##bits##Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap) \
++void Screen::draw##bits##Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet) \
+ { \
+-	if (bc != bgcolor) { \
+-		draw##bits(x, y, w, fc, bc, pixmap); \
++	if (bc != bgcolor || bgSet) { \
++		draw##bits(x, y, w, fc, bc, pixmap, bgSet); \
+ 		return; \
+ 	} \
+  \

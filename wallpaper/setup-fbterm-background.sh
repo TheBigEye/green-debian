@@ -24,7 +24,7 @@ FONT_WIDTH=8              # forced classic console cell width
 FONT_HEIGHT=16            # forced classic console cell height
 BACKGROUND_MODE="cover"   # cover = fill the real display, cropping
                           # fit   = original image, complete and centered
-BACKGROUND_BRIGHTNESS=45   # percent: 100 = original, lower = darker
+BACKGROUND_BRIGHTNESS=35   # percent: 100 = original, lower = darker
 # ------------------------------------------------------------------------------
 
 DEST_BIN="$HOME/.local/bin/fbterm-background"
@@ -784,7 +784,7 @@ fi
 # KEY=VALUE data, never shell code. Only FBTERM_MODE is honoured, and
 # only the values "cover" and "fit" are accepted.
 MODE="cover"
-BRIGHTNESS=45
+BRIGHTNESS=35
 CONFIG_FILE="$HOME/.config/fbterm-background/config"
 if [ -f "$CONFIG_FILE" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
@@ -1269,7 +1269,7 @@ Done. How to use it:
 
 Notes:
   - Image: ~/.config/fbterm-background/config has FBTERM_MODE=cover|fit
-    and FBTERM_BRIGHTNESS=45; preserved across reinstalls.
+    and FBTERM_BRIGHTNESS=35; preserved across reinstalls.
   - Disable without uninstalling: touch ~/.config/fbterm-background/disabled
   - One-off without background: fbterm-background --no-background
   - Everything is re-runnable: ./setup-fbterm-background.sh
