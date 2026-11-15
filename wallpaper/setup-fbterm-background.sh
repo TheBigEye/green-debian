@@ -566,6 +566,11 @@ verify_install() {
         else
             v_ok "terminfo correctly silent about smcup (stock fbterm)"
         fi
+        if infocmp -x fbterm-256color 2>/dev/null | grep -q 'U8#1'; then
+            v_ok "terminfo declares U8 (UTF-8 box drawing)"
+        else
+            v_bad "terminfo lacks U8#1 (box drawing garbled in UTF-8 locales)"
+        fi
         if env -u TERMINFO -u TERMINFO_DIRS HOME=/nonexistent-fbterm-check infocmp fbterm-256color >/dev/null 2>&1; then
             v_ok "terminfo entry also visible to root/sudo (system copy)"
         else

@@ -3,9 +3,13 @@
 # renamed from "fbterm" to "fbterm-256color" exactly as the well-known
 # AUR fbterm package does. Capabilities are identical: colors#256 with
 # FbTerm's private color sequences setaf=ESC[1;n} / setab=ESC[2;n}.
+# One addition over upstream: U8#1. Without it, ncurses in a UTF-8
+# locale sends the CP437 ACS bytes (0xC4 for a horizontal line) as
+# Latin-1 characters, and FbTerm shows box drawing (ncdu, mc, dialog)
+# as alternating garbage letters instead of lines.
 #	Reconstructed via infocmp from file: /lib/terminfo/l/linux
 fbterm-256color|framebuffer based terminal emulator,
-	am, bce, ccc, eo, mir, msgr, xenl, xon,
+	am, bce, ccc, eo, mir, msgr, U8#1, xenl, xon,
 	colors#256, it#8, ncv#18, pairs#32767,
 	acsc=+\020\,\021-\030.^Y0\333`\004a\261f\370g\361h\260i\316j\331k\277l\332m\300n\305o~p\304q\304r\304s_t\303u\264v\301w\302x\263y\363z\362{\343|\330}\234~\376,
 	bel=^G, blink=\E[5m, bold=\E[1m, civis=\E[?25l\E[?1c,
