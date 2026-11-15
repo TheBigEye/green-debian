@@ -8,8 +8,9 @@
 #   2 patched   builds fbterm-compat.patch into /usr/local/bin/
 #               fbterm-patched (xterm colours/OSC, alternate screen);
 #               stock /usr/bin/fbterm is not touched
-#   3 terminfo  fbterm-256color entry in ~/.terminfo (smcup announced
-#               only when the patched binary exists)
+#   3 terminfo  fbterm-256color entry in ~/.terminfo and /etc/terminfo
+#               (the system copy is what root finds under sudo;
+#               smcup announced only when the patched binary exists)
 # Then everything is verified; any failure exits non-zero.
 # --uninstall removes phases 3, 2, 1 in that order and verifies.
 # APT packages are never removed by this script.
@@ -51,6 +52,8 @@ DEST_PATCHED="/usr/local/bin/fbterm-patched"
 TI_FILE="$SCRIPT_DIR/fbterm-256color.ti"
 TERMINFO_DIR="$HOME/.terminfo"
 TERMINFO_COMPILED="$TERMINFO_DIR/f/fbterm-256color"
+TERMINFO_SYS_DIR="/etc/terminfo"
+TERMINFO_SYS_COMPILED="$TERMINFO_SYS_DIR/f/fbterm-256color"
 
 USE_APT=1
 ALLOW_ROOT=0
@@ -382,6 +385,10 @@ revert_term_lines() {
 terminfo_uninstall() {
     rm -f "$TERMINFO_COMPILED"
     echo "Removed compiled terminfo entry: $TERMINFO_COMPILED"
+    if [ -e "$TERMINFO_SYS_COMPILED" ]; then
+        $SUDO rm -f "$TERMINFO_SYS_COMPILED"
+        echo "Removed system terminfo entry: $TERMINFO_SYS_COMPILED"
+    fi
     revert_term_lines
 }
 
@@ -423,7 +430,21 @@ terminfo_install() {
         [ "$TI_SOURCE" != "$TI_FILE" ] && rm -f "$TI_SOURCE"
         return 1
     }
+
+    # System copy for root: sudo programs look in /root/.terminfo,
+    # not in the user's, and failed with "Error opening terminal"
+    # when only the user copy existed.
+    SYS_OK=1
+    $SUDO mkdir -p "$TERMINFO_SYS_DIR" >/dev/null 2>&1 || SYS_OK=0
+    [ "$SYS_OK" -eq 1 ] && { $SUDO tic -x -o "$TERMINFO_SYS_DIR" "$TI_SOURCE" || SYS_OK=0; }
     [ "$TI_SOURCE" != "$TI_FILE" ] && rm -f "$TI_SOURCE"
+    if [ "$SYS_OK" -eq 1 ]; then
+        echo "Compiled system terminfo entry: $TERMINFO_SYS_COMPILED (for root/sudo)"
+    else
+        echo "Warning: the system terminfo copy could not be" >&2
+        echo "installed in $TERMINFO_SYS_DIR; root programs (sudo" >&2
+        echo "nano, sudo vim...) will not find fbterm-256color." >&2
+    fi
     echo "Compiled terminfo entry: $TERMINFO_COMPILED ($ALT_NOTE)"
 
     command -v infocmp >/dev/null 2>&1 || {
@@ -545,6 +566,11 @@ verify_install() {
         else
             v_ok "terminfo correctly silent about smcup (stock fbterm)"
         fi
+        if env -u TERMINFO -u TERMINFO_DIRS HOME=/nonexistent-fbterm-check infocmp fbterm-256color >/dev/null 2>&1; then
+            v_ok "terminfo entry also visible to root/sudo (system copy)"
+        else
+            v_bad "terminfo entry not visible to root/sudo (root programs fail with 'Error opening terminal')"
+        fi
     else
         v_bad "terminfo entry fbterm-256color not found by infocmp"
     fi
@@ -564,6 +590,7 @@ verify_uninstall() {
     [ -e "$DEST_IDUMP" ] && { echo "  [FAIL] viewer remains: $DEST_IDUMP"; leftovers=$((leftovers + 1)); }
     [ -e "$DEST_DATA" ] && { echo "  [FAIL] data dir remains: $DEST_DATA"; leftovers=$((leftovers + 1)); }
     [ -e "$TERMINFO_COMPILED" ] && { echo "  [FAIL] terminfo entry remains: $TERMINFO_COMPILED"; leftovers=$((leftovers + 1)); }
+    [ -e "$TERMINFO_SYS_COMPILED" ] && { echo "  [FAIL] system terminfo entry remains: $TERMINFO_SYS_COMPILED"; leftovers=$((leftovers + 1)); }
     [ -e "$DEST_PATCHED" ] && { echo "  [FAIL] patched binary remains: $DEST_PATCHED"; leftovers=$((leftovers + 1)); }
     if [ -f "$HOME/.fbtermrc" ] && grep -qF '# Created by fbterm-background installer' "$HOME/.fbtermrc"; then
         echo "  [FAIL] ~/.fbtermrc created by the installer remains"; leftovers=$((leftovers + 1))
