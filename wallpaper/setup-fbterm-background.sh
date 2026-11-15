@@ -1,57 +1,18 @@
 #!/usr/bin/env bash
-# setup-fbterm-background.sh - One script for the whole fbterm-background
-# setup: classic 8x16 font + wallpaper + fastfetch on Debian TTYs, with a
-# patched FbTerm for native xterm sequences. English version.
+# setup-fbterm-background.sh - wallpaper + classic 8x16 font + fastfetch
+# on Debian TTYs (FbTerm, no X11). English version.
 #
-# This replaces the old separate scripts (install-fbterm-background.sh,
-# build-fbterm-patched.sh, compile-fbterm-256color.sh, compile-idump.sh);
-# their logic lives here as phases, run in the only order that works:
-#
-#   Phase 1 (core):      APT packages fbterm + fastfetch (no recommends,
-#                        no X11), wallpaper + idump viewer, classic
-#                        Default8x16 bitmap font (fontconfig verified),
-#                        ~/.fbtermrc, the ~/.local/bin/fbterm-background
-#                        launcher and the login-profile block that
-#                        starts everything on physical TTYs only.
-#   Phase 2 (patched):   Downloads the FbTerm 1.7 Debian source (SHA-256
-#                        verified against the .dsc), applies the Debian
-#                        patches + fbterm-compat.patch (bright and
-#                        256-color SGR, truecolor approximation, OSC
-#                        consumption, alternate screen), builds it and
-#                        installs /usr/local/bin/fbterm-patched. The
-#                        stock /usr/bin/fbterm is never touched; the
-#                        launcher prefers the patched binary when it
-#                        exists and the login block then runs fastfetch
-#                        unfiltered. Skip with --no-patched.
-#   Phase 3 (terminfo):  Compiles fbterm-256color.ti into ~/.terminfo
-#                        (FbTerm's own 256-color entry under the name
-#                        programs look for). Only when the patched
-#                        binary exists, the entry also announces the
-#                        alternate screen (smcup/rmcup), which stock
-#                        FbTerm could not honour.
-#   Verification:        Every piece is checked at the end (binaries,
-#                        launcher, viewer, font resolution via fc-match,
-#                        ~/.fbtermrc, profile block, terminfo colors and
-#                        smcup, patched binary). Failures are listed and
-#                        make the script exit non-zero.
-#
-# --uninstall removes everything in reverse order (terminfo entry,
-# patched binary, then all core files/blocks) and verifies that nothing
-# is left. APT packages are kept; the summary says how to purge them.
-#
-# Files installed (core phase):
-#   ~/.local/bin/fbterm-background        launcher (idump + fbterm)
-#   ~/.local/bin/idump                    static framebuffer viewer
-#   ~/.fbtermrc                           only if missing or created here
-#   ~/.local/share/fbterm-background/     wallpaper + viewer source
-#   ~/.local/share/fonts/fbterm-background/ Default8x16 bitmap font
-#   ~/.config/fontconfig/conf.d/70-fbterm-background-bitmap.conf
-#   ~/.config/fbterm-background/          config (kept on uninstall? no:
-#                                         removed; mode/brightness only)
-#   a marked block in your login profile (~/.bash_profile preferred)
-#
-# No X11 anywhere: fbterm needs fontconfig/freetype only (libraries,
-# not a display server).
+# Phases, in order:
+#   1 core      packages (fbterm, fastfetch), wallpaper, idump viewer,
+#               Default8x16 font, ~/.fbtermrc, launcher, profile block
+#   2 patched   builds fbterm-compat.patch into /usr/local/bin/
+#               fbterm-patched (xterm colours/OSC, alternate screen);
+#               stock /usr/bin/fbterm is not touched
+#   3 terminfo  fbterm-256color entry in ~/.terminfo (smcup announced
+#               only when the patched binary exists)
+# Then everything is verified; any failure exits non-zero.
+# --uninstall removes phases 3, 2, 1 in that order and verifies.
+# APT packages are never removed by this script.
 set -u
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -149,6 +110,10 @@ fi
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
 
+# setcap/getcap live in /usr/sbin, which many user PATHs lack.
+SETCAP="$(command -v setcap || true)"; [ -n "$SETCAP" ] || SETCAP=/usr/sbin/setcap
+GETCAP="$(command -v getcap || true)"; [ -n "$GETCAP" ] || GETCAP=/usr/sbin/getcap
+
 # Remove a marker-delimited block from a profile file.
 # Safety rule: the range is deleted ONLY if a begin marker exists and an
 # end marker exists AFTER it. A missing or out-of-order end marker means
@@ -217,6 +182,27 @@ uninstall_patched() {
     else
         echo "$DEST_PATCHED does not exist; nothing to remove."
     fi
+}
+
+ensure_keymap_cap() {
+    # Remapping the console keymap (KDSKBENT) needs CAP_SYS_TTY_CONFIG.
+    # Without it FbTerm prints "[input] can't change kernel keymap
+    # table..." into the first shell at every start; the print happens
+    # in the child process with the pty as stdout, so no redirect can
+    # catch it. Granting the capability is the fix from the man page
+    # (and it makes FbTerm's shortcuts work).
+    [ -x "$DEST_PATCHED" ] || return 0
+    if [ -x "$GETCAP" ] && "$GETCAP" "$DEST_PATCHED" 2>/dev/null | grep -q 'cap_sys_tty_config'; then
+        echo "CAP_SYS_TTY_CONFIG already set on $DEST_PATCHED"
+        return 0
+    fi
+    if [ ! -x "$SETCAP" ] && [ "$USE_APT" -eq 1 ]; then
+        echo "Installing libcap2-bin (provides setcap)..."
+        $SUDO apt-get install -y --no-install-recommends libcap2-bin || return 1
+    fi
+    [ -x "$SETCAP" ] || { echo "setcap is not available" >&2; return 1; }
+    echo "Setting CAP_SYS_TTY_CONFIG on $DEST_PATCHED..."
+    $SUDO "$SETCAP" 'cap_sys_tty_config+ep' "$DEST_PATCHED"
 }
 
 build_patched() (
@@ -412,15 +398,10 @@ terminfo_install() {
 
     mkdir -p "$TERMINFO_DIR"
 
-    # The alternate screen (smcup/rmcup, used by vim/less/htop via
-    # ncurses) is announced only when the patched FbTerm binary is
-    # installed (phase 2 of this script). Stock FbTerm ignores
-    # ESC[?1049h; announcing the capability to it would leave
-    # full-screen programs without the screen restore they expect.
-    # With fbterm-patched present, the entry is compiled from a
-    # temporary copy with two lines added; the shipped
-    # fbterm-256color.ti stays unchanged either way. (If you remove
-    # fbterm-patched later, re-run this script.)
+    # smcup/rmcup are added only when the patched binary exists:
+    # stock fbterm ignores ESC[?1049h and full-screen apps would
+    # lose their screen restore. Compiled from a temp copy; the
+    # shipped .ti is not modified.
     TI_SOURCE="$TI_FILE"
     ALT_NOTE="alternate screen not announced (stock fbterm)"
     if [ -x /usr/local/bin/fbterm-patched ]; then
@@ -523,6 +504,13 @@ verify_install() {
         fi
     else
         v_bad "patched fbterm missing or not working ($DEST_PATCHED)"
+    fi
+    if [ "$SKIP_PATCHED" -eq 1 ]; then
+        v_skip "keymap capability (--no-patched)"
+    elif [ -x "$GETCAP" ] && "$GETCAP" "$DEST_PATCHED" 2>/dev/null | grep -q 'cap_sys_tty_config'; then
+        v_ok "CAP_SYS_TTY_CONFIG set (no '[input]' keymap warning)"
+    else
+        v_bad "CAP_SYS_TTY_CONFIG missing on $DEST_PATCHED ('[input]' warning will appear)"
     fi
     if [ -x "$DEST_BIN" ]; then v_ok "launcher exists ($DEST_BIN)"; else v_bad "launcher missing ($DEST_BIN)"; fi
     if [ -x "$DEST_IDUMP" ] && "$DEST_IDUMP" -h >/dev/null 2>&1; then v_ok "idump viewer runs"; else v_bad "idump viewer missing or not runnable ($DEST_IDUMP)"; fi
@@ -661,11 +649,8 @@ if command -v fc-cache >/dev/null 2>&1; then
     fc-cache -f "$DEST_FONT_DIR" >/dev/null 2>&1 || true
 fi
 
-# Verify that fontconfig really resolves the classic font. Every
-# layer of this chain (search path, bitmap rejection, stale
-# caches) can silently fall back to a vector font (DejaVu), which
-# is exactly the "wrong font" symptom inside FbTerm; catch it
-# here, at install time, and try one self-heal first.
+# Check the font really resolves: if any layer (search path, bitmap
+# rejection, stale cache) fails, fontconfig silently uses DejaVu.
 FONT_STATUS="not checked (fc-match not available)"
 if command -v fc-match >/dev/null 2>&1; then
     if fc-match Default8x16 2>/dev/null | grep -qi 'Default8x16'; then
@@ -811,10 +796,8 @@ case "$TTY_ACTUAL" in
     *) fail "not a physical TTY ($TTY_ACTUAL). Log in on tty1-tty6 and retry." ;;
 esac
 
-# A patched FbTerm (./setup-fbterm-background.sh: native bright/256
-# colors and OSC handling) wins over the stock binary when present.
-# The choice is made on every login, so installing or removing the
-# patched binary takes effect without reinstalling anything.
+# Prefer the patched FbTerm when installed. Decided at every login,
+# so adding/removing it needs no reinstall.
 FBTERM_BIN=fbterm
 if [ -x /usr/local/bin/fbterm-patched ]; then
     FBTERM_BIN=/usr/local/bin/fbterm-patched
@@ -829,15 +812,9 @@ open_fbterm() {
     else
         export FBTERM_BACKGROUND_IMAGE=1
     fi
-    # FbTerm diagnostics (stdout AND stderr: the "[input] can't
-    # change kernel keymap table" warning is printed with printf)
-    # go to a log file, never to the physical console. Anything the
-    # kernel console draws on the framebuffer before FbTerm captures
-    # it (that warning appears because FbTerm lacks
-    # CAP_SYS_TTY_CONFIG; see "man fbterm", SECURITY NOTES) would be
-    # baked into the background image and stay visible forever.
-    # FbTerm itself draws on /dev/fb0 and its shell gets a pty, so
-    # redirecting the fbterm process's own stdout is harmless.
+    # fbterm's own stdout/stderr go to a log: anything written to the
+    # console before fbterm captures the framebuffer would be baked
+    # into the background image. The shell gets a pty, so this is safe.
     LOG_DIR="$HOME/.cache/fbterm-background"
     mkdir -p "$LOG_DIR"
     if [ "$FBTERM_BIN" != fbterm ]; then
@@ -931,10 +908,8 @@ else
     echo "For the classic console font, set: font-names=$FONT_NAME, font-size=$FONT_SIZE, font-width=$FONT_WIDTH, font-height=$FONT_HEIGHT"
 fi
 
-# Whatever happened above, report what FbTerm will actually be
-# asked to use. A foreign ~/.fbtermrc with another font-names is
-# the other silent cause of the "wrong font" symptom; it is never
-# overwritten, but name it and give the one-line fix.
+# A foreign ~/.fbtermrc is never overwritten, but if it names another
+# font, say so and give the fix.
 if [ -f "$HOME/.fbtermrc" ] && grep -q '^font-names=Default8x16' "$HOME/.fbtermrc"; then
     echo "FbTerm config check: ~/.fbtermrc asks for Default8x16 (ok)."
 else
@@ -1047,32 +1022,19 @@ elif [ -z "${FBTERM_FASTFETCH_DONE:-}" ]; then
     fi
     if command -v fastfetch >/dev/null 2>&1; then
         if [ -n "${FBTERM_PATCHED:-}" ]; then
-            # Patched FbTerm (./setup-fbterm-background.sh) understands
-            # OSC 8 hyperlinks and bright/256-color SGR natively, so
-            # fastfetch runs unfiltered, exactly like on xterm. This
-            # covers the automatic run and later manual runs alike.
+            # Patched FbTerm handles OSC 8 and bright/256 colours
+            # itself: run fastfetch unfiltered.
             if command -v timeout >/dev/null 2>&1; then
                 timeout 15 fastfetch || true
             else
                 fastfetch || true
             fi
         elif command -v perl >/dev/null 2>&1; then
-            # Stock FbTerm: fastfetch needs a filter, for the
-            # automatic run below AND for any later manual run in
-            # this session:
-            #  - On a TTY it wraps the Disk mountpoint in an OSC 8
-            #    hyperlink (ESC ] 8 ;; file://...). FbTerm's escape
-            #    parser predates OSC 8 and prints it as garbage
-            #    ("Disk (://///;:;)"), so OSC sequences are stripped.
-            #  - It also emits bright SGR colors (90-97 text,
-            #    100-107 background), which FbTerm ignores. The
-            #    filter translates them into FbTerm's classic model:
-            #    bold+30-37 = bright text, blink+40-47 = bright
-            #    background. Without this, fastfetch's second Colors
-            #    row renders as uniform gray.
-            # "--pipe false" keeps colors even though stdout is a
-            # pipe. The real binary stays reachable as
-            # "command fastfetch".
+            # Stock FbTerm mangles fastfetch (OSC 8 prints as garbage,
+            # bright colours are dropped), so filter its output: strip
+            # OSC, map 90-97 -> bold+30-37 and 100-107 -> blink+40-47.
+            # Applies to the auto-run and to manual runs in this shell.
+            # "--pipe false" keeps colours through the pipe.
             # shellcheck disable=SC2120,SC2119
             fastfetch() {
                 local _ffbin
@@ -1153,6 +1115,13 @@ else
         echo "Warning: the patched FbTerm could not be built/installed." >&2
         echo "Continuing with the stock fbterm: the setup stays functional" >&2
         echo "(fastfetch uses the Perl filter; no alternate screen)." >&2
+    fi
+fi
+
+if [ "$SKIP_PATCHED" -ne 1 ]; then
+    if ! ensure_keymap_cap; then
+        echo "Warning: CAP_SYS_TTY_CONFIG could not be set; the '[input]" >&2
+        echo "can't change kernel keymap table' message will keep appearing." >&2
     fi
 fi
 

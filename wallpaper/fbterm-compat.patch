@@ -1,59 +1,31 @@
-fbterm-compat.patch -- xterm compatibility for FbTerm 1.7
-===========================================================
+fbterm-compat.patch -- xterm sequences + alternate screen for FbTerm 1.7
+========================================================================
 
-Stock FbTerm 1.7 (as packaged by Debian, fbterm 1.7-5) predates
-several xterm escape sequences that modern programs emit
-unconditionally, without consulting terminfo (fastfetch is one):
+Stock FbTerm 1.7 (Debian fbterm 1.7-5) lacks: bright SGR
+(90-97/100-107), 256-colour SGR (38;5/48;5), truecolor SGR
+(38;2/48;2), any OSC handling (OSC 8 hyperlinks print as
+garbage), and the alternate screen (DECSET 47/1047/1048/1049).
+It also turns blink + dark background into a bright background
+in FbShell::adjustCharAttr (VGA trick); with real bright
+backgrounds available that only corrupts colours - fastfetch's
+black colour square came out grey - so the patch removes it.
 
-  * SGR 90-97 / 100-107      bright foreground/background colours
-  * SGR 38;5;<n> / 48;5;<n>  256-colour foreground/background
-  * SGR 38;2 / 48;2          truecolor (approximated to the cube)
-  * OSC sequences            (OSC 8 hyperlinks, OSC 52, titles...)
-  * DECSET 1049 & friends    alternate screen (vim, less, htop)
+Changes:
+  vterm_action.cpp  SGR extended colours; alternate screen
+                    (47/1047 swap buffer, 1048 cursor, 1049 both;
+                    scrollback untouched by the alternate screen)
+  vterm_states.cpp  ESC ] enters the OSC state; ESC \ = ST
+  vterm.cpp         OSC bytes swallowed until BEL/CAN/SUB/ST
+                    (FbTerm palette OSC ] P / ] R still works);
+                    no history saves from the alternate screen
+  vterm.h           ESosc state, OSC/alternate-screen members
+  fbshell.cpp       blink no longer brightens the background
 
-Without this patch, SGR 48;5;<n> turns blink on, an OSC 8
-hyperlink ("ESC ] 8 ;; file://... BEL") leaks onto the screen as
-garbage text, and full-screen programs draw over your shell
-because the alternate screen does not exist.
+Parser verified with a headless VTerm harness: 40/40 checks
+pass, stock parser fails 23 of the same 40.
 
-The patch teaches FbTerm's VT parser:
-  * src/lib/vterm_action.cpp: the SGR codes above, in
-    set_display_attr(); FbTerm's CharAttr already stores 8-bit
-    colour indices and its renderer already has a 256-colour
-    palette (used by its private ESC[1;<n>} sequences), so this
-    is purely a parser addition. Legacy SGR 38 behaviour
-    (default colour + underline) is kept for the non-extended form.
-  * src/lib/vterm_states.cpp + src/lib/vterm.cpp + vterm.h: a real
-    OSC state (ESosc). An OSC is consumed until BEL, CAN, SUB or
-    ST (ESC \) and dropped, except FbTerm's own palette commands
-    (ESC ] P... / ESC ] R), which are handed to the legacy
-    ESnonstd state unchanged. ESC \ is also accepted as a string
-    terminator in the ESesc state.
-  * Alternate screen in set_alt_screen()/save_screen()/
-    restore_screen(): DECSET/DECRST 47 and 1047 switch to a
-    fresh, cleared screen and back (main screen snapshot is
-    restored), 1048 saves/restores cursor + rendition, 1049 is
-    the combination (ncurses smcup/rmcup). Entering clears the
-    alternate screen and homes the cursor; leaving also resets
-    the scroll margins to the full screen. Lines scrolled off
-    inside the alternate screen are lost instead of polluting
-    the main scrollback, history browsing is suspended while it
-    is active, and RIS (ESC c) leaves it, like in xterm.
-    enable_mode() now honours every parameter of a mode sequence
-    (ESC [ ? 1049 ; 25 h), not just the first one.
-
-Verified with a headless harness that drives VTerm directly and
-inspects the resulting cell grid (colours, attributes, screen
-contents, cursor, history): 40/40 checks pass; the stock Debian
-parser fails 23 of the same 40.
-
-Apply AFTER the Debian patch series (build-fbterm-patched.sh does
-the full download/patch/build/install cycle):
-
-    patch -p1 < fbterm-compat.patch
-
-Result: /usr/local/bin/fbterm-patched (stock /usr/bin/fbterm is
-not touched).
+Apply after the Debian patch series (the setup script does the
+whole cycle):  patch -p1 < fbterm-compat.patch
 
 --- a/src/lib/vterm.h
 +++ b/src/lib/vterm.h
@@ -504,3 +476,13 @@ not touched).
  		default :
  			break;
  		}
+--- a/src/fbshell.cpp
++++ b/src/fbshell.cpp
+@@ -700,7 +700,6 @@
+ 	else if (attr.underline) attr.fcolor = 6; // cyan
+ 	else if (attr.intensity == 0) attr.fcolor = 8; // gray
+ 
+-	if (attr.blink && attr.bcolor < 8) attr.bcolor ^= 8;
+ 	if (attr.intensity == 2 && attr.fcolor < 8) attr.fcolor ^= 8;
+ 
+ 	if (attr.reverse) {
