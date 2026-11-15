@@ -1,140 +1,289 @@
-fbterm-compat.patch -- xterm sequences + alternate screen for FbTerm 1.7
-========================================================================
-
-Stock FbTerm 1.7 (Debian fbterm 1.7-5) lacks: bright SGR
-(90-97/100-107), 256-colour SGR (38;5/48;5), truecolor SGR
-(38;2/48;2), any OSC handling (OSC 8 hyperlinks print as
-garbage), and the alternate screen (DECSET 47/1047/1048/1049).
-It also turns blink + dark background into a bright background
-in FbShell::adjustCharAttr (VGA trick); with real bright
-backgrounds available that only corrupts colours - fastfetch's
-black colour square came out grey - so the patch removes it.
-
-Two more stock parser gaps, same symptom (escape tails printed
-as text): a CSI sequence with a private prefix (< = >), colon
-sub-parameters or intermediate bytes aborted the sequence at
-that byte and printed the rest - fish's ESC[>4;1m came out as
-"4;1m" at every prompt. Such sequences now enter an ignore
-state and are swallowed up to their final byte. And with a
-background image, an explicit black background (SGR 40,
-48;5;0) used to look transparent: CharAttr now carries bg_set,
-set by every SGR background sequence and cleared by SGR 0/49,
-and the render code paints the colour instead of the image
-when it is set. Plain text keeps the transparent background.
-
-Changes:
-  vterm_action.cpp  SGR extended colours; alternate screen
-                    (47/1047 swap buffer, 1048 cursor, 1049 both;
-                    scrollback untouched by the alternate screen)
-  vterm_states.cpp  ESC ] enters the OSC state; ESC \ = ST;
-                    unsupported CSI prefixes/intermediates enter
-                    the ignore state
-  vterm.cpp         OSC bytes swallowed until BEL/CAN/SUB/ST
-                    (FbTerm palette OSC ] P / ] R still works);
-                    ignored CSI swallowed to its final byte;
-                    no history saves from the alternate screen
-  vterm.h           ESosc/ESignore states, OSC/alternate-screen
-                    members, CharAttr bg_set flag
-  fbshell.cpp       blink no longer brightens the background;
-                    passes bg_set to the screen
-  screen.h/.cpp,    bg_set threaded through text drawing;
-  screen_render.cpp explicit background painted over the image
-
-Parser verified with a headless VTerm harness: colour/OSC/
-alternate-screen checks, explicit-background checks 9/9,
-private-CSI checks 7/7.
-
-Apply after the Debian patch series (the setup script does the
-whole cycle):  patch -p1 < fbterm-compat.patch
-
---- a/src/lib/vterm.h
-+++ b/src/lib/vterm.h
-@@ -32,7 +32,7 @@
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -3,7 +3,7 @@
+ bin_PROGRAMS = fbterm
  
- 		bool operator != (const CharAttr a) {
- 			return fcolor != a.fcolor || bcolor != a.bcolor || intensity != a.intensity
--				|| italic != a.italic || underline != a.underline || blink != a.blink || reverse != a.reverse;
-+				|| italic != a.italic || underline != a.underline || blink != a.blink || reverse != a.reverse || bg_set != a.bg_set;
- 		}
+ fbterm_SOURCES = fbconfig.cpp fbconfig.h fbio.cpp fbio.h fbshell.cpp fbshell.h fbshellman.cpp fbshellman.h fbterm.cpp \
+-	fbterm.h font.cpp font.h input.cpp input.h input_key.h mouse.cpp mouse.h screen.cpp screen.h improxy.cpp improxy.h \
++	fbterm.h font.cpp font.h input.cpp input.h input_key.h kittykey.cpp kittykey.h mouse.cpp mouse.h screen.cpp screen.h improxy.cpp improxy.h \
+ 	screen_render.cpp fbdev.cpp fbdev.h vesadev.cpp vesadev.h vbe.h
+ EXTRA_fbterm_SOURCES = signalfd.h
  
- 		u16 fcolor : 8;
-@@ -42,6 +42,7 @@
- 		u16 underline : 1;
- 		u16 blink : 1;
- 		u16 reverse : 1;
-+		u16 bg_set : 1; // background set explicitly (paint it even if it is colour 0)
- 		u16 type : 2;
- 	};
+--- a/src/fbshell.cpp
++++ b/src/fbshell.cpp
+@@ -33,6 +33,7 @@
+ #include "screen.h"
+ #include "improxy.h"
+ #include "fbterm.h"
++#include "input.h"
+ #include "font.h"
+ #include "input.h"
  
-@@ -167,6 +168,10 @@
- 	u32 translate_char(u32);
- 	void set_cursor_type();
- 	void linux_specific();
-+	void begin_osc();
-+	void set_alt_screen(bool enter, bool with_cursor);
-+	void save_screen();
-+	void restore_screen();
- 	void begin_set_palette();
- 	void set_palette();
- 	void reset_palette();
-@@ -185,7 +190,7 @@
- 	static bool init_ambiguous_wide();
+@@ -368,7 +369,7 @@
+ 	if (manager->activeShell() != this) return;
  
- 	typedef enum {
--		ESnormal = 0, ESesc, ESsquare, ESnonstd, ESpercent, EScharset, EShash, ESfunckey, ESkeep
-+		ESnormal = 0, ESesc, ESsquare, ESnonstd, ESpercent, EScharset, EShash, ESfunckey, ESosc, ESignore, ESkeep
- 	} EscapeState;
+ 	adjustCharAttr(attr);
+-	screen->drawText(FW(x), FH(y), attr.fcolor, attr.bcolor, num, chars, dws);
++	screen->drawText(FW(x), FH(y), attr.fcolor, attr.bcolor, num, chars, dws, attr.bg_set);
  
- 	EscapeState esc_state;
-@@ -266,6 +271,15 @@
- 	#define NPAR 16
- 	u16 npar, param[NPAR];
- 	bool q_mode, palette_mode;
-+	bool osc_first; // true until the first char of an OSC sequence is seen
+ 	if (mImProxy) {
+ 		Rectangle rect = { FW(x), FH(y), FW(w), FH(1) };
+@@ -425,7 +426,7 @@
+ 		break;
+ 
+ 	case CurUnderline:
+-		screen->fillRect(FW(mCursor.x), FH(mCursor.y + 1) - 1, FW(1), 1, mCursor.showed ? mCursor.attr.fcolor : mCursor.attr.bcolor);
++		screen->fillRect(FW(mCursor.x), FH(mCursor.y + 1) - 1, FW(1), 1, mCursor.showed ? mCursor.attr.fcolor : mCursor.attr.bcolor, mCursor.showed ? true : mCursor.attr.bg_set);
+ 		if (mImProxy) {
+ 			Rectangle rect = { FW(mCursor.x), FH(mCursor.y + 1) - 1, FW(1), 1 };
+ 			mImProxy->redrawImWin(rect);
+@@ -502,6 +503,12 @@
+ 		changeMode(CRWithLF, mode(CRWithLF));
+ 	}
+ 
++	if (type & KittyKeyboard) {
++		// the kernel has no kitty support: input switches the
++		// console to medium-raw and translates keys in userspace
++		TtyInput::instance()->setKittyKeyboard(kittyFlags());
++	}
 +
-+	// alternate screen (DECSET 47/1047/1048/1049): snapshot of the
-+	// main screen, restored when the alternate screen is left
-+	bool alt_active;
-+	u16 *saved_text;
-+	CharAttr *saved_attrs;
-+	u16 *saved_linenumbers;
-+	u16 saved_width, saved_height;
+ 	if (type & (CursorKeyEscO | ApplicKeypad | CRWithLF)) {
+ 		reportMode();
+ 	}
+@@ -660,7 +667,7 @@
+ 		u16 code = charCode(x, y);
  
- 	//history
- 	static u16 history_lines;
---- a/src/lib/vterm_states.cpp
-+++ b/src/lib/vterm_states.cpp
-@@ -50,7 +50,8 @@
+ 		if (attr.type == CharAttr::DoubleRight) x--;
+-		screen->drawText(FW(x), FH(y), attr.bcolor, attr.fcolor, 1, &code, &dw);
++		screen->drawText(FW(x), FH(y), attr.bcolor, attr.fcolor, 1, &code, &dw, true);
  
- 	// ESesc
- 	{ '[', &VTerm::clear_param,	ESsquare },
--	{ ']', &VTerm::clear_param,	ESnonstd },
-+	{ ']', &VTerm::begin_osc,	ESosc },
-+	{ '\\', 0,	ESnormal }, // ST (ESC \) terminates string sequences
- 	{ '%', 0,	ESpercent },
- 	{ '#', 0,	EShash },
- 	{ '(', &VTerm::current_is_g0,	EScharset },
-@@ -69,6 +70,9 @@
+ 		mMousePointer.x = x;
+ 		mMousePointer.y = y;
+@@ -700,13 +707,13 @@
+ 	else if (attr.underline) attr.fcolor = 6; // cyan
+ 	else if (attr.intensity == 0) attr.fcolor = 8; // gray
  
- 	// ESsquare
- 	{ '[', 0,	ESfunckey },
-+	{ '<' | ADDSAME(2), 0,	ESignore }, // CSI private prefixes < = >
-+	{ ':', 0,	ESignore }, // colon sub-parameters (ESC[38:5:...m)
-+	{ ' ' | ADDSAME(15), 0,	ESignore }, // intermediate bytes (ESC[2 q)
- 	{ '?', &VTerm::set_q_mode,	ESkeep },
- 	{ '0' | ADDSAME(9), &VTerm::param_digit,	ESkeep },
- 	{ ';', &VTerm::next_param,	ESkeep },
-@@ -133,4 +137,10 @@
+-	if (attr.blink && attr.bcolor < 8) attr.bcolor ^= 8;
+ 	if (attr.intensity == 2 && attr.fcolor < 8) attr.fcolor ^= 8;
  
- 	// ESfunckey
- 	{ 0xFFFF },
+ 	if (attr.reverse) {
+ 		u16 temp = attr.bcolor;
+ 		attr.bcolor = attr.fcolor;
+ 		attr.fcolor = temp;
++		attr.bg_set = true; // the swapped-in background is meant to be seen
+ 
+ 		if (attr.bcolor > 8 && attr.bcolor < 16) attr.bcolor -= 8;
+ 	}
+--- a/src/input.cpp
++++ b/src/input.cpp
+@@ -28,6 +28,7 @@
+ #include <linux/input.h>
+ #include "input.h"
+ #include "input_key.h"
++#include "kittykey.h"
+ #include "fbshell.h"
+ #include "fbshellman.h"
+ #include "fbterm.h"
+@@ -58,6 +59,8 @@
+ }
+ 
+ TtyInput::TtyInput()
++	: mRawMode(false), mKittyEnc(0), mKittyKm(0), mKittyShell(0),
++	  mKittyFlags(0), mKittyApplied(false)
+ {
+ 	setFd(dup(STDIN_FILENO));
+ }
+@@ -175,6 +178,11 @@
+ 		return;
+ 	}
+ 
++	if (mKittyApplied) {
++		processKittyKeys(buf, len);
++		return;
++	}
 +
-+	// ESosc
-+	{ 0xFFFF },
+ 	FbShell *shell = FbShellManager::instance()->activeShell();
+ 
+ 	u32 start = 0;
+@@ -207,6 +215,7 @@
+ 
+ 	mRawMode = raw;
+ 	ioctl(STDIN_FILENO, KDSKBMODE, mRawMode ? K_MEDIUMRAW : K_UNICODE);
++	applyKittyMode(); // no-op while raw; re-applies kitty mode after IM
+ 
+ 	if (mRawMode) {
+ 		down_num = 0;
+@@ -310,3 +319,133 @@
+ 
+ 	if (shell && len > start) shell->keyInput(buf + start, len - start);
+ }
 +
-+	// ESignore
-+	{ 0xFFFF },
++// ------------------------------------------------------------------
++// kitty keyboard protocol input: the console is switched to
++// K_MEDIUMRAW and scancodes are translated in userspace (kittykey.cpp)
++// for as long as the active shell has kitty flags set. The keymap
++// behind the encoder is the user's real kernel keymap.
++
++class ConsoleKeymap : public KittyKeymap {
++public:
++	ConsoleKeymap() : mAccentLoaded(false), mAccentCount(0) {}
++
++	bool lookup(u8 table, u16 code, u16 &keysym) override
++	{
++		struct kbentry ke;
++		ke.kb_table = table;
++		ke.kb_index = code;
++		if (ioctl(STDIN_FILENO, KDGKBENT, &ke) == -1) return false;
++		keysym = ke.kb_value;
++		return true;
++	}
++
++	bool accent(u32 diacr, u32 base, u32 &result) override
++	{
++		if (!mAccentLoaded) {
++			mAccentLoaded = true;
++			struct kbdiacrsuc diacrs;
++			memset(&diacrs, 0, sizeof(diacrs));
++			if (ioctl(STDIN_FILENO, KDGKBDIACRUC, &diacrs) == 0) {
++				mAccentCount = diacrs.kb_cnt;
++				if (mAccentCount > 256) mAccentCount = 256;
++				memcpy(mAccent, diacrs.kbdiacruc, sizeof(mAccent));
++			}
++		}
++		for (u32 i = 0; i < mAccentCount; i++) {
++			if (mAccent[i].diacr == diacr && mAccent[i].base == base) {
++				result = mAccent[i].result;
++				return true;
++			}
++		}
++		return false;
++	}
++
++private:
++	bool mAccentLoaded;
++	u32 mAccentCount;
++	struct kbdiacruc mAccent[256];
++};
++
++void TtyInput::setKittyKeyboard(u8 flags)
++{
++	mKittyFlags = flags;
++	applyKittyMode();
++}
++
++void TtyInput::applyKittyMode()
++{
++	if (mRawMode) { // the input-method raw mode owns the console
++		mKittyApplied = false;
++		return;
++	}
++
++	bool want = (mKittyFlags != 0);
++	if (want == mKittyApplied) return;
++
++	if (want) {
++		if (!mKittyEnc) {
++			mKittyKm = new ConsoleKeymap();
++			mKittyEnc = new KittyEncoder(mKittyKm);
++		}
++		ioctl(STDIN_FILENO, KDSKBMODE, K_MEDIUMRAW);
++		mKittyEnc->reset();
++		syncKittyLocks();
++		mKittyShell = 0;
++		mKittyApplied = true;
++	} else {
++		ioctl(STDIN_FILENO, KDSKBMODE, K_UNICODE);
++		mKittyApplied = false;
++		if (mKittyEnc) mKittyEnc->reset();
++	}
++}
++
++void TtyInput::syncKittyLocks()
++{
++	if (!mKittyEnc) return;
++	char leds = 0;
++	if (ioctl(STDIN_FILENO, KDGETLED, &leds) == 0)
++		mKittyEnc->setLocks(leds & LED_CAP, leds & LED_NUM);
++}
++
++void TtyInput::processKittyKeys(s8 *buf, u32 len)
++{
++	FbShell *shell = FbShellManager::instance()->activeShell();
++	if (!shell || !mKittyEnc) return;
++
++	if (shell != mKittyShell) { // do not leak state across shells
++		mKittyShell = shell;
++		mKittyEnc->reset();
++		syncKittyLocks();
++	}
++
++	mKittyEnc->setModes(mKittyFlags, shell->mode(VTerm::CursorKeyEscO),
++			    shell->mode(VTerm::ApplicKeypad));
++
++	for (u32 i = 0; i < len; i++) {
++		bool down = !(buf[i] & 0x80);
++		u16 code = buf[i] & 0x7f;
++
++		if (!code) { // extended scancode (rare two-byte form)
++			if (i + 2 >= len) break;
++			code = (buf[++i] & 0x7f) << 7;
++			code |= buf[++i] & 0x7f;
++			if (!(buf[i] & 0x80) || !(buf[i - 1] & 0x80)) continue;
++		}
++
++		char out[64];
++		u32 n = mKittyEnc->feed(code, down, out, sizeof(out));
++
++		if (u16 syskey = mKittyEnc->takeSyskey())
++			FbTerm::instance()->processSysKey(syskey);
++		if (u16 vc = mKittyEnc->takeVc())
++			ioctl(STDIN_FILENO, VT_ACTIVATE, vc);
++		if (n) shell->keyInput(out, n);
++	}
++
++	if (mKittyEnc->consumeLockChanged()) {
++		char leds = (mKittyEnc->capsLock() ? LED_CAP : 0)
++			| (mKittyEnc->numLock() ? LED_NUM : 0);
++		ioctl(STDIN_FILENO, KDSETLED, leds);
++	}
++}
+--- a/src/input.h
++++ b/src/input.h
+@@ -24,19 +24,34 @@
+ #include "io.h"
+ #include "instance.h"
+ 
++class KittyEncoder;
++class KittyKeymap;
++class FbShell;
++
+ class TtyInput : public IoPipe {
+ 	DECLARE_INSTANCE(TtyInput)
+ public:
+ 	void switchVc(bool enter);
+ 	void setRawMode(bool raw, bool force = false);
+ 	void showInfo(bool verbose);
++	// kitty keyboard protocol: called by the active shell when its
++	// kitty flags change (0 = protocol off, kernel translation)
++	void setKittyKeyboard(u8 flags);
+ 
+ private:
+ 	virtual void readyRead(s8 *buf, u32 len);
+ 	void setupSysKey(bool restore);
+ 	void processRawKeys(s8* buf, u32 len);
++	void processKittyKeys(s8 *buf, u32 len);
++	void applyKittyMode();
++	void syncKittyLocks();
+ 
+ 	bool mRawMode;
++	KittyEncoder *mKittyEnc;
++	KittyKeymap *mKittyKm;
++	FbShell *mKittyShell;
++	u8 mKittyFlags;
++	bool mKittyApplied;
  };
+ 
+ #endif
 --- a/src/lib/vterm.cpp
 +++ b/src/lib/vterm.cpp
 @@ -25,7 +25,7 @@
@@ -177,15 +326,16 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  	delete[] tab_stops;
  	delete[] linenumbers;
  	delete[] dirty_startx;
-@@ -138,6 +148,7 @@
+@@ -138,6 +148,8 @@
  	charset = g0_charset;
  
  	esc_state = ESnormal;
 +	alt_active = false;
++	memset(mKitty, 0, sizeof(mKitty));
  
  	pending_scroll = 0;
  	scroll_top = 0;
-@@ -469,6 +480,42 @@
+@@ -469,6 +481,42 @@
  
  void VTerm::do_control_char()
  {
@@ -228,7 +378,24 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  	u8 index = (cur_char < MAX_CONTROL_CODE ? control_map[cur_char] : 0);
  	const Sequence *seq = control_sequences + index;
  
-@@ -608,7 +655,7 @@
+@@ -476,6 +524,16 @@
+ 		seq = escape_sequences + (cur_char < MAX_ESCAPE_CODE ? escape_map[esc_state][cur_char] : 0);
+ 	}
+ 
++	/* An unknown privately-prefixed CSI (CSI > 4;1m modifyOtherKeys,
++	 * CSI = ... with a final we do not implement...) is swallowed
++	 * whole, as before; only CSI ... u is handled (kitty keyboard).
++	 * SCO restore-cursor (plain CSI u) is unaffected. */
++	if (esc_state == ESsquare && csi_prefix && seq->next == ESnormal && cur_char != 'u') {
++		csi_prefix = 0;
++		esc_state = ESnormal;
++		return;
++	}
++
+ 	if (seq->action) (this->*(seq->action))();
+ 	if (seq->next != ESkeep) esc_state = seq->next;
+ }
+@@ -608,7 +666,7 @@
  	if (num > mx) num = mx;
  	if (-num > mx) num = -mx;
  
@@ -237,7 +404,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  		history_scroll(num);
  	}
  
-@@ -778,6 +825,7 @@
+@@ -778,6 +836,7 @@
  
  void VTerm::historyDisplay(bool absolute, s32 num)
  {
@@ -245,12 +412,156 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  	if (!history_lines || (absolute && num == (s32)visual_start_line) || (!absolute && !num)) return;
  
  	u32 bak_line = visual_start_line;
+--- a/src/lib/vterm.h
++++ b/src/lib/vterm.h
+@@ -32,7 +32,7 @@
+ 
+ 		bool operator != (const CharAttr a) {
+ 			return fcolor != a.fcolor || bcolor != a.bcolor || intensity != a.intensity
+-				|| italic != a.italic || underline != a.underline || blink != a.blink || reverse != a.reverse;
++				|| italic != a.italic || underline != a.underline || blink != a.blink || reverse != a.reverse || bg_set != a.bg_set;
+ 		}
+ 
+ 		u16 fcolor : 8;
+@@ -42,6 +42,7 @@
+ 		u16 underline : 1;
+ 		u16 blink : 1;
+ 		u16 reverse : 1;
++		u16 bg_set : 1; // background set explicitly (paint it even if it is colour 0)
+ 		u16 type : 2;
+ 	};
+ 
+@@ -61,6 +62,7 @@
+ 		AutoRepeatKey = 16,
+ 		ApplicKeypad = 32,
+ 		CRWithLF = 64,
++		KittyKeyboard = 128,
+ 		AllModes = 0xff,
+ 	} ModeType;
+ 
+@@ -77,6 +79,8 @@
+ 
+ 	u16 w() { return width; }
+ 	u16 h() { return height; }
++	// kitty keyboard protocol: current flags of the active screen
++	u8 kittyFlags() { return mKitty[alt_active ? 1 : 0].flags; }
+ 	void historyDisplay(bool absolute, s32 num);
+ 	u16 mode(ModeType type);
+ 	void resize(u16 w, u16 h);
+@@ -100,6 +104,19 @@
+ 	virtual void requestUpdate(u16 x, u16 y, u16 w, u16 h);
+ 
+ private:
++	// kitty keyboard protocol (CSI = / > / < / ? ... u)
++	struct KittyState {
++		u8 flags;
++		u8 stack[16];
++		u8 sp;
++	};
++	KittyState mKitty[2]; // 0 = main screen, 1 = alternate screen
++	u8 csi_prefix; // '<', '=' or '>' seen in this CSI, 0 = none
++	KittyState &kittyState() { return mKitty[alt_active ? 1 : 0]; }
++	void kittyChanged();
++	void set_csi_prefix();
++	void csi_u();
++
+ 	// utility functions
+ 	void do_normal_char();
+ 	void do_control_char();
+@@ -167,6 +184,10 @@
+ 	u32 translate_char(u32);
+ 	void set_cursor_type();
+ 	void linux_specific();
++	void begin_osc();
++	void set_alt_screen(bool enter, bool with_cursor);
++	void save_screen();
++	void restore_screen();
+ 	void begin_set_palette();
+ 	void set_palette();
+ 	void reset_palette();
+@@ -185,7 +206,7 @@
+ 	static bool init_ambiguous_wide();
+ 
+ 	typedef enum {
+-		ESnormal = 0, ESesc, ESsquare, ESnonstd, ESpercent, EScharset, EShash, ESfunckey, ESkeep
++		ESnormal = 0, ESesc, ESsquare, ESnonstd, ESpercent, EScharset, EShash, ESfunckey, ESosc, ESignore, ESkeep
+ 	} EscapeState;
+ 
+ 	EscapeState esc_state;
+@@ -266,6 +287,15 @@
+ 	#define NPAR 16
+ 	u16 npar, param[NPAR];
+ 	bool q_mode, palette_mode;
++	bool osc_first; // true until the first char of an OSC sequence is seen
++
++	// alternate screen (DECSET 47/1047/1048/1049): snapshot of the
++	// main screen, restored when the alternate screen is left
++	bool alt_active;
++	u16 *saved_text;
++	CharAttr *saved_attrs;
++	u16 *saved_linenumbers;
++	u16 saved_width, saved_height;
+ 
+ 	//history
+ 	static u16 history_lines;
 --- a/src/lib/vterm_action.cpp
 +++ b/src/lib/vterm_action.cpp
-@@ -96,6 +96,12 @@
+@@ -92,10 +92,64 @@
+ {
+ 	q_mode = 0;
+ 	palette_mode = 0;
++	csi_prefix = 0;
+ 	npar = 0;
  	memset(param, 0, sizeof(param));
  }
  
++void VTerm::set_csi_prefix()
++{
++	csi_prefix = cur_char;
++}
++
++void VTerm::kittyChanged()
++{
++	modeChanged(KittyKeyboard);
++}
++
++// CSI = flags ; mode u (set), CSI > flags u (push), CSI < n u (pop),
++// CSI ? u (query). Without prefix or '?', CSI u is SCO restore cursor.
++void VTerm::csi_u()
++{
++	KittyState &st = kittyState();
++
++	if (csi_prefix == '=') {
++		u8 mode = (npar >= 1 && param[1]) ? param[1] : 1;
++		u8 flags = param[0] & 31;
++		if (mode == 2) st.flags |= flags;
++		else if (mode == 3) st.flags &= ~flags;
++		else st.flags = flags;
++		kittyChanged();
++	} else if (csi_prefix == '>') {
++		if (st.sp < sizeof(st.stack) / sizeof(st.stack[0]))
++			st.stack[st.sp++] = st.flags;
++		st.flags = param[0] & 31;
++		kittyChanged();
++	} else if (csi_prefix == '<') {
++		u16 n = param[0] ? param[0] : 1;
++		while (n--) {
++			if (!st.sp) { // popping an empty stack resets all flags
++				st.flags = 0;
++				break;
++			}
++			st.flags = st.stack[--st.sp];
++		}
++		kittyChanged();
++	} else if (q_mode) {
++		s8 str[16];
++		snprintf(str, sizeof(str), "\e[?%du", st.flags);
++		sendBack(str);
++	} else {
++		restore_cursor();
++	}
++}
++
 +void VTerm::begin_osc()
 +{
 +	clear_param();
@@ -260,7 +571,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  void VTerm::save_cursor()
  {
  	s_g0_charset = g0_charset;
-@@ -118,6 +124,94 @@
+@@ -118,6 +172,97 @@
  	move_cursor(s_cursor_x, s_cursor_y);
  }
  
@@ -298,6 +609,9 @@ whole cycle):  patch -p1 < fbterm-compat.patch
 +		scroll_bot = height - 1;
 +		if (with_cursor) restore_cursor();
 +	}
++
++	// main and alternate screens have independent kitty flag stacks
++	kittyChanged();
 +}
 +
 +void VTerm::save_screen()
@@ -355,7 +669,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  void VTerm::next_line()
  {
  	lf();
-@@ -399,54 +493,69 @@
+@@ -399,54 +544,69 @@
  
  void VTerm::enable_mode(bool enable)
  {
@@ -472,7 +786,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  	}
  }
  
-@@ -460,6 +569,25 @@
+@@ -460,6 +620,25 @@
  	enable_mode(false);
  }
  
@@ -498,7 +812,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  void VTerm::set_display_attr()
  {
  	for (u16 n = 0; n <= npar; n++) {
-@@ -520,8 +648,21 @@
+@@ -520,8 +699,21 @@
  			char_attr.fcolor = param[n] % 10;
  			break;
  		case 38:
@@ -522,7 +836,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  			break;
  		case 39:
  			char_attr.fcolor = cur_fcolor;
-@@ -529,9 +670,36 @@
+@@ -529,9 +721,36 @@
  			break;
  		case 40 ... 47:
  			char_attr.bcolor = param[n] % 10;
@@ -559,7 +873,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  			break;
  		default :
  			break;
-@@ -689,7 +857,10 @@
+@@ -689,7 +908,10 @@
  		break;
  
  	case 2:
@@ -571,104 +885,48 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  		break;
  
  	case 3:
---- a/src/fbshell.cpp
-+++ b/src/fbshell.cpp
-@@ -368,7 +368,7 @@
- 	if (manager->activeShell() != this) return;
+--- a/src/lib/vterm_states.cpp
++++ b/src/lib/vterm_states.cpp
+@@ -50,7 +50,8 @@
  
- 	adjustCharAttr(attr);
--	screen->drawText(FW(x), FH(y), attr.fcolor, attr.bcolor, num, chars, dws);
-+	screen->drawText(FW(x), FH(y), attr.fcolor, attr.bcolor, num, chars, dws, attr.bg_set);
+ 	// ESesc
+ 	{ '[', &VTerm::clear_param,	ESsquare },
+-	{ ']', &VTerm::clear_param,	ESnonstd },
++	{ ']', &VTerm::begin_osc,	ESosc },
++	{ '\\', 0,	ESnormal }, // ST (ESC \) terminates string sequences
+ 	{ '%', 0,	ESpercent },
+ 	{ '#', 0,	EShash },
+ 	{ '(', &VTerm::current_is_g0,	EScharset },
+@@ -69,6 +70,9 @@
  
- 	if (mImProxy) {
- 		Rectangle rect = { FW(x), FH(y), FW(w), FH(1) };
-@@ -425,7 +425,7 @@
- 		break;
+ 	// ESsquare
+ 	{ '[', 0,	ESfunckey },
++	{ '<' | ADDSAME(2), &VTerm::set_csi_prefix, ESkeep }, // CSI prefixes < = > (kitty keyboard)
++	{ ':', 0,	ESignore }, // colon sub-parameters (ESC[38:5:...m)
++	{ ' ' | ADDSAME(15), 0,	ESignore }, // intermediate bytes (ESC[2 q)
+ 	{ '?', &VTerm::set_q_mode,	ESkeep },
+ 	{ '0' | ADDSAME(9), &VTerm::param_digit,	ESkeep },
+ 	{ ';', &VTerm::next_param,	ESkeep },
+@@ -100,7 +104,7 @@
+ 	{ 'q', &VTerm::set_led, ESnormal },
+ 	{ 'r', &VTerm::set_margins,	ESnormal },
+ 	{ 's', &VTerm::save_cursor,	ESnormal },
+-	{ 'u', &VTerm::restore_cursor,	ESnormal },
++	{ 'u', &VTerm::csi_u,	ESnormal },
+ 	{ '`', &VTerm::cursor_position_col,	ESnormal },
+ 	{ ']', &VTerm::linux_specific, ESnormal },
+ 	{ '}', &VTerm::fbterm_specific, ESnormal },
+@@ -133,4 +137,10 @@
  
- 	case CurUnderline:
--		screen->fillRect(FW(mCursor.x), FH(mCursor.y + 1) - 1, FW(1), 1, mCursor.showed ? mCursor.attr.fcolor : mCursor.attr.bcolor);
-+		screen->fillRect(FW(mCursor.x), FH(mCursor.y + 1) - 1, FW(1), 1, mCursor.showed ? mCursor.attr.fcolor : mCursor.attr.bcolor, mCursor.showed ? true : mCursor.attr.bg_set);
- 		if (mImProxy) {
- 			Rectangle rect = { FW(mCursor.x), FH(mCursor.y + 1) - 1, FW(1), 1 };
- 			mImProxy->redrawImWin(rect);
-@@ -660,7 +660,7 @@
- 		u16 code = charCode(x, y);
- 
- 		if (attr.type == CharAttr::DoubleRight) x--;
--		screen->drawText(FW(x), FH(y), attr.bcolor, attr.fcolor, 1, &code, &dw);
-+		screen->drawText(FW(x), FH(y), attr.bcolor, attr.fcolor, 1, &code, &dw, true);
- 
- 		mMousePointer.x = x;
- 		mMousePointer.y = y;
-@@ -700,13 +700,13 @@
- 	else if (attr.underline) attr.fcolor = 6; // cyan
- 	else if (attr.intensity == 0) attr.fcolor = 8; // gray
- 
--	if (attr.blink && attr.bcolor < 8) attr.bcolor ^= 8;
- 	if (attr.intensity == 2 && attr.fcolor < 8) attr.fcolor ^= 8;
- 
- 	if (attr.reverse) {
- 		u16 temp = attr.bcolor;
- 		attr.bcolor = attr.fcolor;
- 		attr.fcolor = temp;
-+		attr.bg_set = true; // the swapped-in background is meant to be seen
- 
- 		if (attr.bcolor > 8 && attr.bcolor < 16) attr.bcolor -= 8;
- 	}
---- a/src/screen.h
-+++ b/src/screen.h
-@@ -45,8 +45,8 @@
- 	void rotateRect(u32 &x, u32 &y, u32 &w, u32 &h);
- 	void rotatePoint(u32 w, u32 h, u32 &x, u32 &y);
- 
--	void drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw);
--	void fillRect(u32 x, u32 y, u32 w, u32 h, u8 color);
-+	void drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet = false);
-+	void fillRect(u32 x, u32 y, u32 w, u32 h, u8 color, bool bgSet = false);
- 
- 	bool move(u16 scol, u16 srow, u16 dcol, u16 drow, u16 w, u16 h);
- 	void setPalette(const Color *palette);
-@@ -77,26 +77,26 @@
- 	virtual const s8 *drvId() = 0;
- 
- 	void eraseMargin(bool top, u16 h);
--	void drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw);
--	void drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw);
-+	void drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet = false);
-+	void drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw, bool bgSet = false);
- 	void adjustOffset(u32 &x, u32 &y);
- 
- 	void initFillDraw();
- 	void endFillDraw();
- 
--	void fillX(u32 x, u32 y, u32 w, u8 color);
--	void fillXBg(u32 x, u32 y, u32 w, u8 color);
--	void draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
--	void draw15(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
--	void draw16(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
--	void draw32(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
--	void draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
--	void draw15Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
--	void draw16Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
--	void draw32Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
-+	void fillX(u32 x, u32 y, u32 w, u8 color, bool bgSet);
-+	void fillXBg(u32 x, u32 y, u32 w, u8 color, bool bgSet);
-+	void draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
-+	void draw15(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
-+	void draw16(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
-+	void draw32(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
-+	void draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
-+	void draw15Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
-+	void draw16Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
-+	void draw32Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
- 
--	typedef void (Screen::*fillFun)(u32 x, u32 y, u32 w, u8 color);
--	typedef void (Screen::*drawFun)(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
-+	typedef void (Screen::*fillFun)(u32 x, u32 y, u32 w, u8 color, bool bgSet);
-+	typedef void (Screen::*drawFun)(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
- 
- 	fillFun fill;
- 	drawFun draw;
+ 	// ESfunckey
+ 	{ 0xFFFF },
++
++	// ESosc
++	{ 0xFFFF },
++
++	// ESignore
++	{ 0xFFFF },
+ };
 --- a/src/screen.cpp
 +++ b/src/screen.cpp
 @@ -197,7 +197,7 @@
@@ -779,6 +1037,60 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  	}
  }
  
+--- a/src/screen.h
++++ b/src/screen.h
+@@ -45,8 +45,8 @@
+ 	void rotateRect(u32 &x, u32 &y, u32 &w, u32 &h);
+ 	void rotatePoint(u32 w, u32 h, u32 &x, u32 &y);
+ 
+-	void drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw);
+-	void fillRect(u32 x, u32 y, u32 w, u32 h, u8 color);
++	void drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet = false);
++	void fillRect(u32 x, u32 y, u32 w, u32 h, u8 color, bool bgSet = false);
+ 
+ 	bool move(u16 scol, u16 srow, u16 dcol, u16 drow, u16 w, u16 h);
+ 	void setPalette(const Color *palette);
+@@ -77,26 +77,26 @@
+ 	virtual const s8 *drvId() = 0;
+ 
+ 	void eraseMargin(bool top, u16 h);
+-	void drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw);
+-	void drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw);
++	void drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet = false);
++	void drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw, bool bgSet = false);
+ 	void adjustOffset(u32 &x, u32 &y);
+ 
+ 	void initFillDraw();
+ 	void endFillDraw();
+ 
+-	void fillX(u32 x, u32 y, u32 w, u8 color);
+-	void fillXBg(u32 x, u32 y, u32 w, u8 color);
+-	void draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw15(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw16(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw32(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw15Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw16Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw32Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
++	void fillX(u32 x, u32 y, u32 w, u8 color, bool bgSet);
++	void fillXBg(u32 x, u32 y, u32 w, u8 color, bool bgSet);
++	void draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw15(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw16(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw32(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw15Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw16Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw32Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
+ 
+-	typedef void (Screen::*fillFun)(u32 x, u32 y, u32 w, u8 color);
+-	typedef void (Screen::*drawFun)(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
++	typedef void (Screen::*fillFun)(u32 x, u32 y, u32 w, u8 color, bool bgSet);
++	typedef void (Screen::*drawFun)(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
+ 
+ 	fillFun fill;
+ 	drawFun draw;
 --- a/src/screen_render.cpp
 +++ b/src/screen_render.cpp
 @@ -109,7 +109,7 @@
@@ -849,3 +1161,690 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  		return; \
  	} \
   \
+--- a/src/kittykey.cpp
++++ b/src/kittykey.cpp
+@@ -0,0 +1,609 @@
++/*
++ *   kittykey.cpp - kitty keyboard protocol encoder (see kittykey.h).
++ *
++ *   The translation mirrors the Linux VT keyboard driver
++ *   (drivers/tty/vt/keyboard.c): modifier state is tracked from
++ *   KT_SHIFT keysyms, the effective keysym is looked up in the
++ *   kernel keymap for that state, dead keys keep a pending
++ *   diacritic combined through the kernel accent table, and
++ *   CapsLock/NumLock are toggles.
++ *
++ *   Not reproduced (documented losses in kitty mode):
++ *   - Alt+keypad numeric character composition (KT_ASCII)
++ *   - Braille keys (KT_BRL), sticky slock composition details
++ */
++
++#include <stdio.h>
++#include <string.h>
++#include <linux/keyboard.h>
++#include <linux/input.h>
++#include "kittykey.h"
++#include "input_key.h" // AC_START / AC_END (FbTerm system keys)
++
++#define BIT(x) (1 << (x))
++
++#ifndef KT_CSI
++#define KT_CSI 15 // keymap CSI keys (type number from drivers/tty/vt/vt.h)
++#endif
++
++static u32 putUtf8(char *out, u32 cp)
++{
++	if (cp < 0x80) {
++		out[0] = (char)cp;
++		return 1;
++	}
++	if (cp < 0x800) {
++		out[0] = (char)(0xc0 | (cp >> 6));
++		out[1] = (char)(0x80 | (cp & 0x3f));
++		return 2;
++	}
++	if (cp < 0x10000) {
++		out[0] = (char)(0xe0 | (cp >> 12));
++		out[1] = (char)(0x80 | ((cp >> 6) & 0x3f));
++		out[2] = (char)(0x80 | (cp & 0x3f));
++		return 3;
++	}
++	out[0] = (char)(0xf0 | (cp >> 18));
++	out[1] = (char)(0x80 | ((cp >> 12) & 0x3f));
++	out[2] = (char)(0x80 | ((cp >> 6) & 0x3f));
++	out[3] = (char)(0x80 | (cp & 0x3f));
++	return 4;
++}
++
++// CSI key[:alternate] [; modifiers[:event]] [; text] u
++// mods < 0 means "no modifiers", which is encoded by omitting the field.
++static u32 csiU(char *out, u32 size, u32 key, u32 alt, u32 text, int mods, int evt)
++{
++	int n;
++	if (alt)
++		n = snprintf(out, size, "\x1b[%u:%u", key, alt);
++	else
++		n = snprintf(out, size, "\x1b[%u", key);
++	if (mods >= 0 || evt || text) { // modifiers field must be present
++		                        // when a text field follows
++		n += snprintf(out + n, size - n, ";%d", mods >= 0 ? mods : 1);
++		if (evt) n += snprintf(out + n, size - n, ":%d", evt);
++	}
++	if (text) n += snprintf(out + n, size - n, ";%u", text);
++	n += snprintf(out + n, size - n, "u");
++	return (u32)n;
++}
++
++// CSI [1;] modifiers[:event] letter   (arrows, Home/End, F1-F4)
++static u32 csiLetter(char *out, u32 size, char letter, int mods, int evt)
++{
++	if (mods < 0 && !evt) return snprintf(out, size, "\x1b[%c", letter);
++	int n = snprintf(out, size, "\x1b[1;%d", mods >= 0 ? mods : 1);
++	if (evt) n += snprintf(out + n, size - n, ":%d", evt);
++	n += snprintf(out + n, size - n, "%c", letter);
++	return (u32)n;
++}
++
++// CSI number [; modifiers[:event]] ~
++static u32 csiTilde(char *out, u32 size, u32 num, int mods, int evt)
++{
++	int n = snprintf(out, size, "\x1b[%u", num);
++	if (mods >= 0 || evt) {
++		n += snprintf(out + n, size - n, ";%d", mods >= 0 ? mods : 1);
++		if (evt) n += snprintf(out + n, size - n, ":%d", evt);
++	}
++	n += snprintf(out + n, size - n, "~");
++	return (u32)n;
++}
++
++void KittyEncoder::reset()
++{
++	mFlags = 0;
++	mCursorApp = mKeypadApp = false;
++	mCaps = mNum = false;
++	mLockChanged = false;
++	memset(mDown, 0, sizeof(mDown));
++	memset(mShiftDown, 0, sizeof(mShiftDown));
++	mShiftState = 0;
++	mDiacr = 0;
++	mComposeNext = false;
++	mSyskey = mVc = 0;
++}
++
++int KittyEncoder::kittyMods(bool locks) const
++{
++	int m = 0;
++	if (mShiftState & (BIT(KG_SHIFT) | BIT(KG_SHIFTL) | BIT(KG_SHIFTR) | BIT(KG_CAPSSHIFT))) m |= 1;
++	if (mShiftState & BIT(KG_ALT)) m |= 2;
++	if (mShiftState & (BIT(KG_CTRL) | BIT(KG_CTRLL) | BIT(KG_CTRLR))) m |= 4;
++	if (locks) {
++		if (mCaps) m |= 64;
++		if (mNum) m |= 128;
++	}
++	return m;
++}
++
++// Decode one KDGKBENT result. The ioctl returns the stored keysym
++// XORed with 0xf000 (the kernel's U() macro), so KT_* keysyms come
++// back as plain K(type, value) (< 0x1000) and unicode codepoints
++// >= 0x100 come back XORed with 0xf000. KT_LETTER entries are
++// characters too (their value is the codepoint).
++static bool decodeKeysym(u16 keysym, u32 &type, u32 &value, u32 &ch)
++{
++	if (!keysym) return false;
++	if ((keysym >> 8) < 16) {
++		type = keysym >> 8;
++		value = keysym & 0xff;
++		if (type == KT_LATIN || type == KT_LETTER) {
++			ch = value;
++			return true;
++		}
++		return false;
++	}
++	type = KT_LATIN;
++	value = ch = keysym ^ 0xf000;
++	return true;
++}
++
++static bool charKeysym(u16 keysym, u32 &ch)
++{
++	u32 type, value;
++	return decodeKeysym(keysym, type, value, ch);
++}
++
++bool KittyEncoder::lookupChar(u8 table, u16 code, u32 &ch)
++{
++	u16 ks;
++	if (!mKm->lookup(table, code, ks)) return false;
++	return charKeysym(ks, ch);
++}
++
++u32 KittyEncoder::combineDiacr(u32 c, char *out)
++{
++	u32 d = mDiacr, res;
++	mDiacr = 0;
++	if (mKm->accent(d, c, res)) return putUtf8(out, res);
++	if (c == ' ' || c == d) return putUtf8(out, d);
++	u32 n = putUtf8(out, d);
++	return n + putUtf8(out + n, c);
++}
++
++// ---------------------------------------------------------------------------
++// One function-key style event (arrows/F/nav/pad-nav and CSI-u codes),
++// with the kitty rules for press/repeat/release reporting.
++struct KeyForm {
++	enum Kind { Letter, Tilde, UCode, Ss3 } kind;
++	u32 num;     // tilde number / CSI-u code
++	char letter; // letter final
++};
++
++u32 KittyEncoder::feed(u16 code, bool down, char *out, u32 outSize)
++{
++	if (code >= 128 || !outSize) return 0;
++
++	bool rep = down && mDown[code];
++	mDown[code] = down;
++
++	u16 raw = 0;
++	mKm->lookup((u8)mShiftState, code, raw);
++
++	// Normalise like the kernel: values below 0xf000 are unicode
++	// codepoints, above they are K(KT_*, value) keysyms.
++	bool isChar = false;
++	u32 ch = 0, type = KT_LATIN, value = 0;
++	if (raw) isChar = decodeKeysym(raw, type, value, ch);
++	else return 0;
++
++	// A hole in a modified table: the kernel falls back to the plain
++	// map for the modifier-aware KT_CUR / KT_CSI key types.
++	if (!isChar && type == KT_SPEC && value == 0 && mShiftState) {
++		u16 plain = 0;
++		if (mKm->lookup(0, code, plain) && plain) {
++			u32 t2, v2, c2;
++			bool ic2 = decodeKeysym(plain, t2, v2, c2);
++			if (!ic2 && (t2 == KT_CUR || t2 == KT_CSI)) {
++				type = t2;
++				value = v2;
++			}
++		}
++	}
++
++	bool shift = (mShiftState & (BIT(KG_SHIFT) | BIT(KG_SHIFTL) | BIT(KG_SHIFTR) | BIT(KG_CAPSSHIFT))) != 0;
++	bool ctrl = (mShiftState & (BIT(KG_CTRL) | BIT(KG_CTRLL) | BIT(KG_CTRLR))) != 0;
++	bool alt = (mShiftState & BIT(KG_ALT)) != 0;
++	int evt = down ? ((rep && (mFlags & 2)) ? 2 : 0) : 3;
++	int mods = kittyMods(true);
++	bool dis = (mFlags & 9) != 0; // flag 8 implies flag 1
++	int modsParam = mods ? 1 + mods : -1;
++
++	// Helper for the functional forms (not for text keys).
++	auto emitForm = [&](const KeyForm &f, bool noReleaseWithoutAll) -> u32 {
++		if (!down && !(mFlags & 2)) return 0;
++		if (!down && noReleaseWithoutAll && !(mFlags & 8)) return 0;
++		int e = down ? evt : 3;
++		switch (f.kind) {
++		case KeyForm::Ss3:
++			if (e) // SS3 has no encoding for events; use CSI form
++				return csiLetter(out, outSize, f.letter, modsParam, e);
++			out[0] = 0x1b; out[1] = 'O'; out[2] = f.letter;
++			return 3;
++		case KeyForm::Letter:
++			return csiLetter(out, outSize, f.letter, modsParam, e);
++		case KeyForm::Tilde:
++			return csiTilde(out, outSize, f.num, modsParam, e);
++		default:
++			return csiU(out, outSize, f.num, 0, 0, modsParam, e);
++		}
++	};
++
++	if (!isChar) {
++		switch (type) {
++		case KT_SHIFT:
++		case KT_SLOCK: {
++			if (value >= 16) return 0;
++			u32 v = value;
++			if (!rep) {
++				if (v == KG_CAPSSHIFT) {
++					if (down && mCaps) {
++						mCaps = false;
++						mLockChanged = true;
++					}
++					v = KG_SHIFT;
++				}
++				if (down) mShiftDown[v]++;
++				else if (mShiftDown[v]) mShiftDown[v]--;
++				if (mShiftDown[v]) mShiftState |= (1 << v);
++				else mShiftState &= ~(1 << v);
++			}
++			if (type != KT_SHIFT || !(mFlags & 8)) return 0;
++			if (!down && !(mFlags & 2)) return 0;
++			u32 kc = 0;
++			switch (code) {
++			case KEY_LEFTSHIFT: kc = 57441; break;
++			case KEY_RIGHTSHIFT: kc = 57447; break;
++			case KEY_LEFTCTRL: kc = 57442; break;
++			case KEY_RIGHTCTRL: kc = 57448; break;
++			case KEY_LEFTALT: kc = 57443; break;
++			case KEY_RIGHTALT: kc = (value == KG_ALTGR) ? 57453 : 57449; break;
++			case KEY_LEFTMETA: kc = 57444; break;
++			case KEY_RIGHTMETA: kc = 57450; break;
++			default: break;
++			}
++			if (!kc) return 0;
++			int m2 = kittyMods(true);
++			return csiU(out, outSize, kc, 0, 0, m2 ? 1 + m2 : -1, down ? evt : 3);
++		}
++
++		case KT_LOCK:
++			if (down && !rep && value == KG_CAPSSHIFT) {
++				mCaps = !mCaps;
++				mLockChanged = true;
++			}
++			if ((mFlags & 8) && value == KG_CAPSSHIFT)
++				return emitForm(KeyForm{KeyForm::UCode, 57358, 0}, false);
++			return 0;
++
++		case KT_CONS:
++			if (down && !rep) mVc = (u16)(value + 1);
++			return 0;
++
++		case KT_SPEC:
++			switch (value) {
++			case 1: { // fn_enter
++				if (!down) {
++					if ((mFlags & 2) && (mFlags & 8))
++						return csiU(out, outSize, 13, 0, 0, modsParam, 3);
++					return 0;
++				}
++				int m = (shift ? 1 : 0) | (alt ? 2 : 0) | (ctrl ? 4 : 0);
++				if (!m) {
++					out[0] = '\r';
++					return 1;
++				}
++				if (alt && !shift && !ctrl) {
++					out[0] = 0x1b; out[1] = '\r';
++					return 2;
++				}
++				if (dis)
++					return csiU(out, outSize, 13, 0, 0, modsParam, evt);
++				out[0] = '\r';
++				return 1;
++			}
++			case 7: // fn_caps_toggle
++			case 13: // fn_caps_on
++				if (down && !rep) {
++					mCaps = (value == 13) ? true : !mCaps;
++					mLockChanged = true;
++				}
++				if (mFlags & 8)
++					return emitForm(KeyForm{KeyForm::UCode, 57358, 0}, false);
++				return 0;
++			case 8: // fn_num
++				if (down && !rep) {
++					mNum = !mNum;
++					mLockChanged = true;
++				}
++				if (mFlags & 8)
++					return emitForm(KeyForm{KeyForm::UCode, 57360, 0}, false);
++				return 0;
++			case 14: // fn_compose
++				if (down) mComposeNext = true;
++				return 0;
++			default:
++				return 0;
++			}
++
++		case KT_DEAD: {
++			static const u8 retDiacr[27] = {
++				'`', '\'', '^', '~', '"', ',', '_', 'U', '.', '*', '=',
++				'c', 'k', 'i', '#', 'o', '!', '?', '+', '-', ')', '(',
++				':', 'n', ';', '$', '@'
++			};
++			if (!down || value >= 27) return 0;
++			u32 dc = retDiacr[value];
++			if (!mDiacr) {
++				mDiacr = dc;
++				return 0;
++			}
++			u32 res;
++			if (mKm->accent(mDiacr, dc, res)) {
++				mDiacr = res;
++				return 0;
++			}
++			u32 n = putUtf8(out, mDiacr);
++			mDiacr = dc;
++			return n;
++		}
++
++		case KT_DEAD2:
++			if (down) {
++				if (!mDiacr) {
++					mDiacr = value;
++					return 0;
++				}
++				u32 res;
++				if (mKm->accent(mDiacr, value, res)) {
++					mDiacr = res;
++					return 0;
++				}
++				u32 n = putUtf8(out, mDiacr);
++				mDiacr = value;
++				return n;
++			}
++			return 0;
++
++		case KT_CUR: {
++			static const char curChars[4] = { 'B', 'D', 'C', 'A' }; // down left right up
++			if (value >= 4) return 0;
++			if (mCursorApp && !mods && down && !evt) {
++				out[0] = 0x1b; out[1] = 'O'; out[2] = curChars[value];
++				return 3;
++			}
++			return emitForm(KeyForm{KeyForm::Letter, 0, curChars[value]}, false);
++		}
++
++		case KT_FN: {
++			static const u32 fTilde[8] = { 15, 17, 18, 19, 20, 21, 23, 24 }; // F5..F12
++			if (value <= 3) { // F1..F4
++				static const char fLetters[4] = { 'P', 'Q', 'R', 'S' };
++				if (!mods && down && !evt) {
++					out[0] = 0x1b; out[1] = 'O'; out[2] = fLetters[value];
++					return 3;
++				}
++				return emitForm(KeyForm{KeyForm::Letter, 0, fLetters[value]}, false);
++			}
++			if (value >= 4 && value <= 11)
++				return emitForm(KeyForm{KeyForm::Tilde, fTilde[value - 4], 0}, false);
++			if (value >= 12 && value <= 19) { // F13..F20
++				static const u32 f13Tilde[8] = { 25, 26, 28, 29, 31, 32, 33, 34 };
++				if (dis)
++					return emitForm(KeyForm{KeyForm::UCode, 57376 + (value - 12), 0}, false);
++				return emitForm(KeyForm{KeyForm::Tilde, f13Tilde[value - 12], 0}, false);
++			}
++			switch (value) {
++			case 20: return emitForm(KeyForm{KeyForm::Letter, 0, 'H'}, false); // FIND = Home
++			case 21: return emitForm(KeyForm{KeyForm::Tilde, 2, 0}, false);    // INSERT
++			case 22: return emitForm(KeyForm{KeyForm::Tilde, 3, 0}, false);    // REMOVE = Delete
++			case 23: return emitForm(KeyForm{KeyForm::Letter, 0, 'F'}, false); // SELECT = End
++			case 24: return emitForm(KeyForm{KeyForm::Tilde, 5, 0}, false);    // PGUP
++			case 25: return emitForm(KeyForm{KeyForm::Tilde, 6, 0}, false);    // PGDN
++			case 29: return emitForm(KeyForm{KeyForm::UCode, 57362, 0}, false); // PAUSE
++			default: return 0;
++			}
++		}
++
++		case KT_PAD: {
++			static const char padChars[] = "0123456789+-*/\015,.?()#";
++			if (value > 20) return 0;
++			if (!mNum) {
++				switch (value) {
++				case 16: return emitForm(KeyForm{KeyForm::Tilde, 3, 0}, false);    // PDOT -> Delete
++				case 0: return emitForm(KeyForm{KeyForm::Tilde, 2, 0}, false);     // P0 -> Insert
++				case 1: return emitForm(KeyForm{KeyForm::Letter, 0, 'F'}, false);  // P1 -> End
++				case 2: return emitForm(KeyForm{KeyForm::Letter, 0, 'B'}, false);  // P2 -> Down
++				case 3: return emitForm(KeyForm{KeyForm::Tilde, 6, 0}, false);     // P3 -> PgDn
++				case 4: return emitForm(KeyForm{KeyForm::Letter, 0, 'D'}, false);  // P4 -> Left
++				case 6: return emitForm(KeyForm{KeyForm::Letter, 0, 'C'}, false);  // P6 -> Right
++				case 7: return emitForm(KeyForm{KeyForm::Letter, 0, 'H'}, false);  // P7 -> Home
++				case 8: return emitForm(KeyForm{KeyForm::Letter, 0, 'A'}, false);  // P8 -> Up
++				case 9: return emitForm(KeyForm{KeyForm::Tilde, 5, 0}, false);     // P9 -> PgUp
++				case 5: return emitForm(KeyForm{KeyForm::Letter, 0, 'E'}, false);  // P5 -> Begin
++				default: break;
++				}
++			}
++			if (value == 14) { // KP enter behaves like Enter
++				if (!down) {
++					if ((mFlags & 2) && (mFlags & 8))
++						return csiU(out, outSize, 57414, 0, 0, modsParam, 3);
++					return 0;
++				}
++				out[0] = '\r';
++				return 1;
++			}
++			if (!down && !(mFlags & 2)) return 0;
++			if (mFlags & 8) {
++				u32 kc = 0;
++				if (value <= 9) kc = 57399 + value;
++				else if (value == 15 || value == 16) kc = 57409;
++				else if (value == 13) kc = 57410;
++				else if (value == 12) kc = 57411;
++				else if (value == 11) kc = 57412;
++				else if (value == 10) kc = 57413;
++				if (kc) return csiU(out, outSize, kc, 0, 0, modsParam, down ? evt : 3);
++			}
++			if (!down) return 0;
++			return putUtf8(out, (u32)(u8)padChars[value]);
++		}
++
++		case KT_META: // Meta (Alt) + char in old keymaps
++			if (!down) return 0;
++			if (dis) {
++				int m2 = kittyMods(true) | 2;
++				return csiU(out, outSize, value, 0, 0, 1 + m2, evt);
++			}
++			out[0] = 0x1b;
++			out[1] = (char)value;
++			return 2;
++
++		case KT_CSI: { // the keymap itself asks for CSI <value> [;mod] ~
++			if (!down) return 0;
++			int mod = 1 + (shift ? 1 : 0) + (alt ? 2 : 0) + (ctrl ? 4 : 0);
++			if (mod > 1)
++				return snprintf(out, outSize, "\x1b[%u;%d~", value, mod);
++			return snprintf(out, outSize, "\x1b[%u~", value);
++		}
++
++		default: // KT_ASCII (Alt+keypad compose), KT_BRL, unknowns
++			return 0;
++		}
++	}
++
++	// ------------------------------------------------------------------
++	// Character keys (KT_LATIN / KT_LETTER, or plain unicode keysyms).
++	// CapsLock acts on letters by re-looking-up with shift toggled,
++	// exactly like the kernel.
++	if (type == KT_LETTER && mCaps) {
++		u32 ch2;
++		if (lookupChar((u8)(mShiftState ^ BIT(KG_SHIFT)), code, ch2)) ch = ch2;
++	}
++
++	// FbTerm system keys live in the keymap as latin 0x80.. values.
++	if (down && ch >= (u32)AC_START && ch <= (u32)AC_END) {
++		mSyskey = (u16)ch;
++		return 0;
++	}
++
++	u32 base = ch, shiftedSym = 0;
++	lookupChar(0, code, base);
++	bool hasShifted = lookupChar(BIT(KG_SHIFT), code, shiftedSym);
++	u32 altField = ((mFlags & 4) && shift && hasShifted && shiftedSym != base && shiftedSym >= 0x20)
++		? shiftedSym : 0;
++
++	if (!down) { // releases only in report-all mode
++		if (!(mFlags & 2) || !(mFlags & 8)) return 0;
++		if (base < 0x20 && base != 27 && base != 9) return 0;
++		u32 key = base >= 0x20 || base == 27 || base == 9 ? base : ch;
++		if (key == 0x7f) key = 127;
++		return csiU(out, outSize, key, altField, 0, modsParam, 3);
++	}
++
++	char *p = out;
++
++	// fn_compose: the next character becomes the pending diacritic.
++	if (mComposeNext) {
++		mComposeNext = false;
++		if (ch) mDiacr = ch;
++		return 0;
++	}
++
++	int plainMods = (shift ? 1 : 0) | (alt ? 2 : 0) | (ctrl ? 4 : 0);
++
++	// The Escape key itself.
++	if (base == 27 && ch == 27) {
++		if (dis)
++			return csiU(out, outSize, 27, 0, 0, mods ? modsParam : -1, evt);
++		out[0] = 0x1b;
++		return 1;
++	}
++
++	// Tab key.
++	if (base == 9 && ch <= 9) {
++		if (!plainMods) {
++			out[0] = '\t';
++			return 1;
++		}
++		if (plainMods == 1 && !dis) { // shift+tab, legacy form
++			memcpy(out, "\x1b[Z", 3);
++			return 3;
++		}
++		if (dis)
++			return csiU(out, outSize, 9, 0, 0, modsParam, evt);
++		if (alt && !ctrl) {
++			out[0] = 0x1b; out[1] = '\t';
++			return 2;
++		}
++		out[0] = '\t';
++		return 1;
++	}
++
++	// Backspace key.
++	if (base == 0x7f && ch <= 0x7f) {
++		if (dis && plainMods && plainMods != 2 && plainMods != 4 &&
++		    plainMods != 6 && plainMods != 1)
++			return csiU(out, outSize, 127, 0, 0, modsParam, evt);
++		switch (plainMods) {
++		case 0: case 1: out[0] = 0x7f; return 1;
++		case 4: case 5: out[0] = 0x08; return 1;
++		case 2: case 3: out[0] = 0x1b; out[1] = 0x7f; return 2;
++		default: out[0] = 0x1b; out[1] = 0x08; return 2; // ctrl+alt
++		}
++	}
++
++	bool textKey = (ch >= 0x20 && ch != 0x7f);
++
++	if (textKey) {
++		if (mDiacr) {
++			if (!(ctrl ^ alt)) return combineDiacr(ch, out);
++			// an encoded/legacy key follows: the diacritic stands alone
++			p += putUtf8(p, mDiacr);
++			mDiacr = 0;
++		}
++		if (!(ctrl ^ alt)) {
++			// plain, shift, AltGr or Ctrl+Alt (AltGr-equivalent):
++			// the keymap result is text
++			if (mFlags & 8) {
++				u32 text = (mFlags & 16) ? ch : 0;
++				return (u32)(p - out) + csiU(p, outSize - (p - out), base, altField, text, modsParam, evt);
++			}
++			return (u32)(p - out) + putUtf8(p, ch);
++		}
++		if (!dis) { // legacy bytes
++			if (alt) {
++				*p++ = 0x1b;
++				return (u32)(p - out) + putUtf8(p, ch);
++			}
++			*p++ = (char)ch; // the ctrl-table result is already the byte
++			return (u32)(p - out);
++		}
++		u32 text = ((mFlags & 16) && (mFlags & 8)) ? ch : 0;
++		return (u32)(p - out) + csiU(p, outSize - (p - out), base >= 0x20 ? base : ch,
++					     altField, text, modsParam, evt);
++	}
++
++	// Control results (Ctrl+letter and friends): ch is the byte the
++	// kernel would have produced.
++	if (ctrl || alt) {
++		if (!dis) {
++			if (alt && !ctrl) {
++				*p++ = 0x1b;
++				*p++ = (char)ch;
++				return (u32)(p - out);
++			}
++			*p++ = (char)ch;
++			return (u32)(p - out);
++		}
++		return (u32)(p - out) + csiU(p, outSize - (p - out), base >= 0x20 ? base : ch,
++					     altField, 0, modsParam, evt);
++	}
++
++	if (ch) { // a control code with no modifiers: send it as-is
++		out[0] = (char)ch;
++		return 1;
++	}
++	return 0;
++}
+--- a/src/kittykey.h
++++ b/src/kittykey.h
+@@ -0,0 +1,72 @@
++/*
++ *   kittykey.h - kitty keyboard protocol encoder for FbTerm.
++ *
++ *   Translates console scancodes (K_MEDIUMRAW) into the byte stream
++ *   expected by an application that requested the kitty keyboard
++ *   protocol (CSI > / = ... u). Key identity and text come from the
++ *   kernel keymap (KDGKBENT), so the user's console layout - dead
++ *   keys included, via the kernel accent table - keeps working.
++ *
++ *   The keymap is injected through KittyKeymap so the encoder can
++ *   be unit-tested without a console.
++ */
++
++#ifndef KITTYKEY_H
++#define KITTYKEY_H
++
++#include "type.h"
++
++struct KittyKeymap {
++	virtual ~KittyKeymap() {}
++	// Raw keymap entry (kernel format), false if the ioctl failed.
++	virtual bool lookup(u8 table, u16 code, u16 &keysym) = 0;
++	// Kernel accent table (KDGKBDIACRUC): combine diacritic + base.
++	virtual bool accent(u32 diacr, u32 base, u32 &result) = 0;
++};
++
++class KittyEncoder {
++public:
++	explicit KittyEncoder(KittyKeymap *km) : mKm(km) { reset(); }
++
++	void reset();
++	// Called by the glue before each input batch.
++	void setModes(u8 flags, bool cursorApp, bool keypadApp)
++	{
++		mFlags = flags;
++		mCursorApp = cursorApp;
++		mKeypadApp = keypadApp;
++	}
++	void setLocks(bool caps, bool num) { mCaps = caps; mNum = num; }
++	bool capsLock() const { return mCaps; }
++	bool numLock() const { return mNum; }
++	bool consumeLockChanged()
++	{
++		bool c = mLockChanged;
++		mLockChanged = false;
++		return c;
++	}
++
++	// Feed one scancode event. Returns output length (0 = nothing).
++	// Side channels for the glue: takeSyskey() / takeVc().
++	u32 feed(u16 code, bool down, char *out, u32 outSize);
++	u16 takeSyskey() { u16 v = mSyskey; mSyskey = 0; return v; }
++	u16 takeVc() { u16 v = mVc; mVc = 0; return v; }
++
++private:
++	KittyKeymap *mKm;
++	u8 mFlags;
++	bool mCursorApp, mKeypadApp;
++	bool mCaps, mNum, mLockChanged;
++	bool mDown[128];
++	u8 mShiftDown[16];
++	u16 mShiftState;
++	u32 mDiacr; // pending diacritic codepoint, 0 = none
++	bool mComposeNext;
++	u16 mSyskey, mVc;
++
++	bool lookupChar(u8 table, u16 code, u32 &ch); // unicode keys only
++	int kittyMods(bool locks) const;
++	u32 combineDiacr(u32 ch, char *out); // text output for a text char
++};
++
++#endif
