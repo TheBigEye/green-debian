@@ -1163,7 +1163,7 @@
   \
 --- a/src/kittykey.cpp
 +++ b/src/kittykey.cpp
-@@ -0,0 +1,609 @@
+@@ -0,0 +1,648 @@
 +/*
 + *   kittykey.cpp - kitty keyboard protocol encoder (see kittykey.h).
 + *
@@ -1174,8 +1174,10 @@
 + *   diacritic combined through the kernel accent table, and
 + *   CapsLock/NumLock are toggles.
 + *
++ *   Alt+keypad numeric composition (KT_ASCII) is reproduced,
++ *   including the AltGr hexadecimal variant.
++ *
 + *   Not reproduced (documented losses in kitty mode):
-+ *   - Alt+keypad numeric character composition (KT_ASCII)
 + *   - Braille keys (KT_BRL), sticky slock composition details
 + */
 +
@@ -1268,6 +1270,8 @@
 +	mShiftState = 0;
 +	mDiacr = 0;
 +	mComposeNext = false;
++	mAsciiActive = false;
++	mAsciiValue = 0;
 +	mSyskey = mVc = 0;
 +}
 +
@@ -1317,6 +1321,22 @@
 +	u16 ks;
 +	if (!mKm->lookup(table, code, ks)) return false;
 +	return charKeysym(ks, ch);
++}
++
++// Emit the character composed with Alt+keypad digits. The kernel
++// flushes the composition when a shift key release changes the shift
++// state; it sends the raw codepoint (to_utf8), bypassing any pending
++// diacritic, which stays pending like in the kernel.
++u32 KittyEncoder::flushAscii(char *out, u32 size)
++{
++	mAsciiActive = false;
++	u32 v = mAsciiValue;
++	mAsciiValue = 0;
++	if (v >= 0xd800 && v < 0xe000) return 0; // surrogates: dropped
++	if (v == 0xffff || v >= 0x110000) return 0;
++	if (mFlags & 8) // report-all: key event with the composed text
++		return csiU(out, size, v, 0, (mFlags & 16) ? v : 0, -1, 0);
++	return putUtf8(out, v);
 +}
 +
 +u32 KittyEncoder::combineDiacr(u32 c, char *out)
@@ -1403,6 +1423,7 @@
 +		case KT_SLOCK: {
 +			if (value >= 16) return 0;
 +			u32 v = value;
++			u16 oldState = mShiftState;
 +			if (!rep) {
 +				if (v == KG_CAPSSHIFT) {
 +					if (down && mCaps) {
@@ -1416,8 +1437,13 @@
 +				if (mShiftDown[v]) mShiftState |= (1 << v);
 +				else mShiftState &= ~(1 << v);
 +			}
-+			if (type != KT_SHIFT || !(mFlags & 8)) return 0;
-+			if (!down && !(mFlags & 2)) return 0;
++			// Alt+keypad composition flushes when a shift release
++			// changes the shift state, exactly like the kernel.
++			u32 flushed = 0;
++			if (!down && mShiftState != oldState && mAsciiActive)
++				flushed = flushAscii(out, outSize);
++			if (type != KT_SHIFT || !(mFlags & 8)) return flushed;
++			if (!down && !(mFlags & 2)) return flushed;
 +			u32 kc = 0;
 +			switch (code) {
 +			case KEY_LEFTSHIFT: kc = 57441; break;
@@ -1430,9 +1456,10 @@
 +			case KEY_RIGHTMETA: kc = 57450; break;
 +			default: break;
 +			}
-+			if (!kc) return 0;
++			if (!kc) return flushed;
 +			int m2 = kittyMods(true);
-+			return csiU(out, outSize, kc, 0, 0, m2 ? 1 + m2 : -1, down ? evt : 3);
++			return flushed + csiU(out + flushed, outSize - flushed, kc, 0, 0,
++					      m2 ? 1 + m2 : -1, down ? evt : 3);
 +		}
 +
 +		case KT_LOCK:
@@ -1634,7 +1661,19 @@
 +			return snprintf(out, outSize, "\x1b[%u~", value);
 +		}
 +
-+		default: // KT_ASCII (Alt+keypad compose), KT_BRL, unknowns
++		case KT_ASCII: // Alt+keypad digits compose a codepoint
++			if (!down || value >= 26) return 0;
++			if (!mAsciiActive) {
++				mAsciiActive = true;
++				mAsciiValue = 0;
++			}
++			if (value < 10) // while Alt held: decimal
++				mAsciiValue = mAsciiValue * 10 + value;
++			else // while AltGr held: hexadecimal
++				mAsciiValue = mAsciiValue * 16 + (value - 10);
++			return 0;
++
++		default: // KT_BRL and unknowns
 +			return 0;
 +		}
 +	}
@@ -1775,7 +1814,7 @@
 +}
 --- a/src/kittykey.h
 +++ b/src/kittykey.h
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,75 @@
 +/*
 + *   kittykey.h - kitty keyboard protocol encoder for FbTerm.
 + *
@@ -1840,11 +1879,14 @@
 +	u16 mShiftState;
 +	u32 mDiacr; // pending diacritic codepoint, 0 = none
 +	bool mComposeNext;
++	bool mAsciiActive; // Alt+keypad code composition in progress
++	u32 mAsciiValue;
 +	u16 mSyskey, mVc;
 +
 +	bool lookupChar(u8 table, u16 code, u32 &ch); // unicode keys only
 +	int kittyMods(bool locks) const;
 +	u32 combineDiacr(u32 ch, char *out); // text output for a text char
++	u32 flushAscii(char *out, u32 size); // emit an Alt+keypad composition
 +};
 +
 +#endif
