@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
-# Instalador interactivo de Debian 13.7 "trixie" Stable en el unico disco de la VM.
+# Interactive installer for Debian 13.7 "trixie" Stable onto the VM's only disk.
 #
-# Escenario real para el que esta escrito:
-#   - Subes ESTE archivo a GitHub.
-#   - Arrancas debian-live-13.7.0-amd64-standard.iso en tu VM.
-#   - Dentro del live descargas el script con curl/wget y lo ejecutas.
-#   - La VM tiene UN UNICO disco: /dev/sda. No hay segundo disco, no hay
-#     carpetas compartidas, no hay imagenes auxiliares, no hay anfitrion
-#     involucrado en la instalacion.
+# The real scenario it is written for:
+#   - You upload THIS file to GitHub.
+#   - You boot debian-live-13.7.0-amd64-standard.iso in your VM.
+#   - Inside the live session you download the script with curl/wget and run it.
+#   - The VM has ONE single disk: /dev/sda. There is no second disk, no
+#     shared folders, no auxiliary images, no host involved in the install.
 #
-# Todo el trabajo temporal (log, estado, respaldos, tarballs, Zig, cachés,
-# claves GPG) vive en /tmp, que en trixie es tmpfs en RAM. Por eso:
-#   * NO queda nada del instalador dentro del sistema instalado.
-#   * TODO se pierde al apagar/reiniciar la VM.
-#   * --resume solo funciona MIENTRAS la sesion del live siga viva.
+# All temporary work (log, state, backups, tarballs, Zig, caches, GPG keys)
+# lives in /tmp, which on trixie is tmpfs in RAM. Therefore:
+#   * NOTHING of the installer remains inside the installed system.
+#   * EVERYTHING is lost when you power off/reboot the VM.
+#   * --resume only works WHILE the live session is still alive.
 #
-# No promete "fallo cero": hardware, firmware, red y memoria pueden fallar.
-# Ofrece --explain, --validate, --dry-run, --simulate, --config, --resume,
-# --refresh-limine, preflight, respaldos en RAM, traps y confirmaciones.
+# It does not promise "zero failure": hardware, firmware, network and
+# memory can fail. It offers --explain, --validate, --dry-run, --simulate,
+# --config, --resume, --refresh-limine, preflight, RAM backups, traps and
+# confirmations.
 
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-SCRIPT_VERSION="2.1.2"
+SCRIPT_VERSION="2.2.0"
 SCRIPT_NAME="$(basename "$0")"
 
 DRY_RUN=0
@@ -35,8 +35,8 @@ EXPLAIN_ONLY=0
 LOG_GIVEN=0
 INPUT_CONFIG=""
 
-# Directorios en RAM. STATE_DIR y ARTIFACT_DIR se conservan hasta apagar;
-# SCRATCH_DIR se borra en cleanup para no dejar toolchain ni claves.
+# Directories in RAM. STATE_DIR and ARTIFACT_DIR are kept until poweroff;
+# SCRATCH_DIR is deleted in cleanup so no toolchain or keys are left behind.
 BASE_DIR="/tmp/debian-live-install"
 STATE_DIR="$BASE_DIR/state"
 ARTIFACT_DIR="$BASE_DIR/artifacts"
@@ -78,13 +78,13 @@ cmd_to_text() {
     printf '%s' "${out# }"
 }
 
-# ---------------------------- interfaz (consola pequeña) ----------------------------
-# Pensada para una consola de baja resolución (p. ej. 80x25 o la ventana
-# pequeña de QEMU): líneas cortas, resúmenes de como máximo 10 líneas por
-# bloque, explicación completa solo con ?, colores solo si hay TTY y
-# NO_COLOR no está definido, y animación breve solo en terminal real.
-# Sin TTY (salida capturada, tests, tuberías) todo queda en texto plano,
-# para que el log y la salida sigan siendo comparables byte a byte.
+# ---------------------------- interface (small console) ----------------------------
+# Designed for a low-resolution console (e.g. 80x25 or the small QEMU
+# window): short lines, summaries of at most 10 lines per block, the full
+# explanation only via ?, colours only if there is a TTY and NO_COLOR is
+# not set, and a short animation only on a real terminal.
+# Without a TTY (captured output, tests, pipes) everything stays plain
+# text, so the log and the output remain byte-for-byte comparable.
 
 ui_init() {
     UI_WIDTH=76
@@ -128,9 +128,9 @@ ui_banner() {
     ui_init
     printf '\n'
     ui_rule
-    printf '  %sDEBIAN 13 TRIXIE%s  ·  instalador minimal\n' "$C_CYAN" "$C_RESET"
-    printf '  /dev/sda · LUKS2 · Limine UEFI+BIOS · Openbox o solo TTY\n'
-    printf '  %sv%s%s  ·  ? = ayuda completa  ·  Ctrl+C = cancelar\n' "$C_DIM" "$SCRIPT_VERSION" "$C_RESET"
+    printf '  %sDEBIAN 13 TRIXIE%s  ·  minimal installer\n' "$C_CYAN" "$C_RESET"
+    printf '  /dev/sda · LUKS2 · Limine UEFI+BIOS · Openbox or TTY only\n'
+    printf '  %sv%s%s  ·  ? = full help  ·  Ctrl+C = cancel\n' "$C_DIM" "$SCRIPT_VERSION" "$C_RESET"
     ui_rule
     ui_animation
 }
@@ -142,10 +142,10 @@ ui_animation() {
     # shellcheck disable=SC1003
     local frames=('-' '\' '|' '/') i
     for i in 0 1 2 3 4 5 6 7; do
-        printf '\r  %spreparando instalador %s%s' "$C_DIM" "${frames[i % 4]}" "$C_RESET"
+        printf '\r  %spreparing installer %s%s' "$C_DIM" "${frames[i % 4]}" "$C_RESET"
         sleep 0.06
     done
-    printf '\r  %spreparando instalador listo%s\n' "$C_GREEN" "$C_RESET"
+    printf '\r  %spreparing installer done%s\n' "$C_GREEN" "$C_RESET"
 }
 
 ui_progress() {
@@ -157,7 +157,7 @@ ui_progress() {
     bar="${bar// /#}"
     printf -v empty '%*s' "$((24 - filled))" ''
     empty="${empty// /-}"
-    printf '  %s[%s%s]%s etapa %d/%d\n' "$C_GREEN" "$bar" "$empty" "$C_RESET" "$n" "$total"
+    printf '  %s[%s%s]%s stage %d/%d\n' "$C_GREEN" "$bar" "$empty" "$C_RESET" "$n" "$total"
 }
 
 ui_stage_title() {
@@ -193,7 +193,7 @@ die() {
 
 fail() {
     local line="$1" orden="$2"
-    log "FALLO en línea $line: $orden"
+    log "FAILURE at line $line: $orden"
     cleanup
     exit 1
 }
@@ -208,8 +208,8 @@ cleanup() {
             cryptsetup close cryptroot 2>/dev/null || true
         fi
     fi
-    # Solo se borra el scratch. El estado y los respaldos sobreviven en RAM
-    # para permitir --resume dentro de la misma sesion del live.
+    # Only the scratch dir is deleted. State and backups survive in RAM
+    # to allow --resume within the same live session.
     if [[ -n "$SCRATCH_DIR_REAL" && -d "$SCRATCH_DIR_REAL" ]]; then
         rm -rf -- "$SCRATCH_DIR_REAL" 2>/dev/null || true
     fi
@@ -230,14 +230,14 @@ require_cmd() {
     if (( SIMULATE || DRY_RUN )); then
         return 0
     fi
-    command -v "$1" >/dev/null 2>&1 || die "Falta el comando: $1"
+    command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"
 }
 
 require_root() {
     if (( SIMULATE || DRY_RUN )); then
         return 0
     fi
-    [[ $EUID -eq 0 ]] || die "Ejecuta como root: sudo -i"
+    [[ $EUID -eq 0 ]] || die "Run as root: sudo -i"
 }
 
 capture() {
@@ -258,7 +258,7 @@ truncate_file() {
 
 write_line() {
     local file="$1" line="$2"
-    log "escribir $file: $line"
+    log "write $file: $line"
     run sh -c 'printf "%s\n" "$1" >> "$2"' sh "$line" "$file"
 }
 
@@ -273,7 +273,7 @@ write_lines() {
 
 verify_sha() {
     local expected="$1" file="$2"
-    log "+ sha256sum -c - para $file (esperado $expected)"
+    log "+ sha256sum -c - for $file (expected $expected)"
     if (( DRY_RUN || SIMULATE )); then
         return 0
     fi
@@ -294,7 +294,7 @@ derive_paths() {
 init_dirs() {
     local logdir
     logdir="$(dirname "$LOG_FILE")"
-    mkdir -p -- "$logdir" || die "No se puede crear el directorio del log: $logdir"
+    mkdir -p -- "$logdir" || die "Cannot create the log directory: $logdir"
     if [[ "$logdir" != /tmp ]]; then
         chmod 700 -- "$logdir" 2>/dev/null || true
     fi
@@ -326,15 +326,15 @@ save_config() {
 
 load_config_from() {
     local file="$1" line k v decoded allowed kk
-    [[ -r "$file" ]] || die "No se puede leer la configuración: $file"
+    [[ -r "$file" ]] || die "Cannot read the config: $file"
     while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ -z "$line" ]]; then
             continue
         fi
-        [[ "$line" == *=* ]] || die "Línea de configuración sin '=': $line"
+        [[ "$line" == *=* ]] || die "Config line without '=': $line"
         k="${line%%=*}"
         v="${line#*=}"
-        [[ "$k" =~ ^[A-Z_][A-Z0-9_]*$ ]] || die "Clave de configuración malformada: $k"
+        [[ "$k" =~ ^[A-Z_][A-Z0-9_]*$ ]] || die "Malformed config key: $k"
         allowed=0
         for kk in "${CONFIG_KEYS[@]}"; do
             if [[ "$kk" == "$k" ]]; then
@@ -342,23 +342,23 @@ load_config_from() {
                 break
             fi
         done
-        (( allowed )) || die "Clave de configuración no permitida: $k"
+        (( allowed )) || die "Config key not allowed: $k"
         if [[ -z "$v" ]]; then
-            # Estas claves son legítimamente vacías: sin paquetes extra, o
-            # UUID/ABI aún no descubiertos en etapas tempranas.
+            # These keys are legitimately empty: no extra packages, or
+            # UUID/ABI not discovered yet in early stages.
             case "$k" in
                 EXTRA_PACKAGES_STR|K|LUKS_UUID|ROOT_UUID|BOOT_UUID) ;;
-                *) die "Valor vacío para $k" ;;
+                *) die "Empty value for $k" ;;
             esac
         fi
         if ! decoded="$(printf '%s' "$v" | base64 -d 2>/dev/null)"; then
-            die "Valor base64 inválido para $k"
+            die "Invalid base64 value for $k"
         fi
-        [[ "$decoded" != *$'\n'* && "$decoded" != *$'\r'* ]] || die "Valor con salto de línea no permitido: $k"
+        [[ "$decoded" != *$'\n'* && "$decoded" != *$'\r'* ]] || die "Value with a newline not allowed: $k"
         printf -v "$k" '%s' "$decoded"
     done < "$file"
     parse_extra_packages
-    log "Configuración cargada: $file (sin contraseñas)"
+    log "Config loaded: $file (no passwords)"
 }
 
 mark_stage() {
@@ -367,9 +367,9 @@ mark_stage() {
         return 0
     fi
     mkdir -p "$STATE_DIR"
-    printf '%s\n' "$LAST_STAGE" > "$STATE_FILE" || die "No se puede guardar el estado en $STATE_FILE"
+    printf '%s\n' "$LAST_STAGE" > "$STATE_FILE" || die "Cannot save state to $STATE_FILE"
     save_config
-    log "Etapa $LAST_STAGE completada"
+    log "Stage $LAST_STAGE completed"
     ui_progress "$LAST_STAGE"
 }
 
@@ -394,11 +394,11 @@ parse_extra_packages() {
     local -a arr=()
     oldifs="$IFS"
     IFS=' '
-    # read -ra evita el expansión de comodines que tendría: for p in $VAR
+    # read -ra avoids the glob expansion that for p in $VAR would have
     read -r -a arr <<< "$EXTRA_PACKAGES_STR"
     IFS="$oldifs"
     for p in "${arr[@]}"; do
-        [[ "$p" =~ ^[a-z0-9][a-z0-9+.-]+$ ]] || die "Paquete adicional inválido: $p"
+        [[ "$p" =~ ^[a-z0-9][a-z0-9+.-]+$ ]] || die "Invalid extra package: $p"
         EXTRA_PACKAGES+=("$p")
     done
 }
@@ -425,110 +425,110 @@ is_ip() {
     return 1
 }
 
-# Revalida TODAS las preferencias, vengan de preguntas, --config o --resume.
-# Sin esto, un --config podía saltarse los regex interactivos.
+# Revalidates ALL preferences, whether they come from questions, --config
+# or --resume. Without this, a --config could skip the interactive regexes.
 validate_preferences() {
     local k v
-    log "=== Revalidación estricta de preferencias ==="
+    log "=== Strict revalidation of preferences ==="
     for k in "${CONFIG_KEYS[@]}"; do
         v="${!k}"
-        [[ "$v" != *$'\n'* && "$v" != *$'\r'* && "$v" != *$'\t'* ]] || die "Valor con carácter de control no permitido: $k"
+        [[ "$v" != *$'\n'* && "$v" != *$'\r'* && "$v" != *$'\t'* ]] || die "Value with a control character not allowed: $k"
     done
-    [[ "$U" == /dev/sda ]] || die "El destino debe ser /dev/sda"
-    [[ "$BIOSP" == "${U}1" && "$B" == "${U}2" && "$R" == "${U}3" ]] || die "Particiones derivadas incorrectas: $BIOSP / $B / $R"
-    [[ "$M" = /* && "$M" != "/" ]] || die "Punto de montaje inválido: $M"
-    [[ "$SUITE" == trixie && "$ARCH" == amd64 ]] || die "Solo trixie/amd64"
-    [[ "$LOG_FILE" == /tmp/* ]] || die "--log debe estar bajo /tmp (RAM) para no dejar rastros"
-    [[ "$LOG_FILE" != *..* ]] || die "--log no puede contener '..'"
-    [[ "$HOSTNAME_DEB" =~ ^[a-z][a-z0-9-]{0,62}$ ]] || die "hostname inválido: $HOSTNAME_DEB"
-    [[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "usuario inválido: $USERNAME"
-    in_set "$USER_SHELL" /bin/bash /bin/zsh /bin/dash || die "shell inválida: $USER_SHELL"
-    [[ "$PASS_MIN_LEN" =~ ^[0-9]+$ ]] || die "longitud mínima no numérica: $PASS_MIN_LEN"
-    (( PASS_MIN_LEN >= 1 && PASS_MIN_LEN <= 4096 )) || die "longitud mínima fuera de rango: $PASS_MIN_LEN"
-    in_set "$LOCALE" en_US.UTF-8 C.UTF-8 es_AR.UTF-8 || die "locale inválido: $LOCALE"
-    in_set "$TZ_AREA" America/Argentina/Buenos_Aires UTC Etc/UTC || die "zona inválida: $TZ_AREA"
-    in_set "$KEYMAP" latam es us || die "teclado inválido: $KEYMAP"
-    [[ "$MIRROR" == https://* && "$MIRROR" =~ ^[A-Za-z0-9._/:-]+$ ]] || die "mirror inválido: $MIRROR"
-    [[ "$SECURITY" == https://* && "$SECURITY" =~ ^[A-Za-z0-9._/:-]+$ ]] || die "security inválido: $SECURITY"
-    [[ "$COMPONENTS" =~ ^[a-z0-9,+-]+$ ]] || die "componentes inválidos: $COMPONENTS"
-    in_set "$ESP_SIZE" 512M 1G 2G || die "ESP inválida: $ESP_SIZE"
-    in_set "$BIOS_SIZE" 1M 2M 8M || die "BIOS Boot inválido: $BIOS_SIZE"
-    [[ ${#BOOT_LABEL} -le 11 && "$BOOT_LABEL" =~ ^[A-Za-z0-9_.:-]+$ ]] || die "etiqueta FAT inválida: $BOOT_LABEL"
-    [[ ${#ROOT_LABEL} -le 16 && "$ROOT_LABEL" =~ ^[A-Za-z0-9_.:-]+$ ]] || die "etiqueta raíz inválida: $ROOT_LABEL"
-    [[ ${#LUKS_LABEL} -le 32 && "$LUKS_LABEL" =~ ^[A-Za-z0-9_.:-]+$ ]] || die "etiqueta LUKS inválida: $LUKS_LABEL"
-    in_set "$PBKDF" argon2id pbkdf2 || die "KDF inválido: $PBKDF"
-    in_set "$PBKDF_MEM" 65536 131072 262144 524288 || die "memoria PBKDF inválida: $PBKDF_MEM"
-    in_set "$ROOT_FS" ext4 btrfs || die "rootfs inválido: $ROOT_FS"
-    in_set "$KERNEL_HARDENING" conservador agresivo ninguno || die "endurecimiento inválido: $KERNEL_HARDENING"
-    in_set "$PLYMOUTH_THEME" spinfinity spinner text details ninguno || die "tema Plymouth inválido: $PLYMOUTH_THEME"
-    in_set "$GREETER" greetd ly consola || die "greeter inválido: $GREETER"
-    in_set "$WM" openbox ninguno || die "WM inválido: $WM"
-    in_set "$COMPOSITOR" picom ninguno || die "compositor inválido: $COMPOSITOR"
-    in_set "$BAR" tint2 ninguno || die "barra inválida: $BAR"
-    in_set "$LAUNCHER" rofi ninguno || die "lanzador inválido: $LAUNCHER"
-    in_set "$TERMINAL" xterm alacritty ambas ninguno || die "terminal inválida: $TERMINAL"
-    in_set "$FONT_PKG" fonts-jetbrains-mono fonts-dejavu-core xfonts-terminus || die "fuente inválida: $FONT_PKG"
-    in_set "$PIPEWIRE" minimal bluetooth ninguno || die "PipeWire inválido: $PIPEWIRE"
-    in_set "$NETWORK" NetworkManager dhcpcd ninguno || die "red inválida: $NETWORK"
-    in_set "$FIRMWARE" completo minimo ninguno || die "firmware inválido: $FIRMWARE"
-    in_set "$MICROCODE" ambos intel amd ninguno || die "microcódigo inválido: $MICROCODE"
-    in_set "$DATA_POLICY" conservar borrar "sin respaldos" || die "política de datos inválida: $DATA_POLICY"
-    in_set "$HOTPLUG_POLICY" permitir0 exigir1 omitir || die "política HOTPLUG inválida: $HOTPLUG_POLICY"
-    in_set "$LIMINE_BIOS_FORCE" si no || die "LIMINE_BIOS_FORCE debe ser si/no: $LIMINE_BIOS_FORCE"
-    [[ "$SIZE_MIN_GB" =~ ^[0-9]+$ && "$SIZE_MAX_GB" =~ ^[0-9]+$ ]] || die "rango de tamaño no numérico"
-    (( SIZE_MIN_GB >= 1 && SIZE_MAX_GB <= 2000 && SIZE_MIN_GB <= SIZE_MAX_GB )) || die "rango de tamaño inválido: $SIZE_MIN_GB-$SIZE_MAX_GB GB"
+    [[ "$U" == /dev/sda ]] || die "The target must be /dev/sda"
+    [[ "$BIOSP" == "${U}1" && "$B" == "${U}2" && "$R" == "${U}3" ]] || die "Wrong derived partitions: $BIOSP / $B / $R"
+    [[ "$M" = /* && "$M" != "/" ]] || die "Invalid mount point: $M"
+    [[ "$SUITE" == trixie && "$ARCH" == amd64 ]] || die "Only trixie/amd64"
+    [[ "$LOG_FILE" == /tmp/* ]] || die "--log must be under /tmp (RAM) to leave no traces"
+    [[ "$LOG_FILE" != *..* ]] || die "--log must not contain '..'"
+    [[ "$HOSTNAME_DEB" =~ ^[a-z][a-z0-9-]{0,62}$ ]] || die "invalid hostname: $HOSTNAME_DEB"
+    [[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "invalid user name: $USERNAME"
+    in_set "$USER_SHELL" /bin/bash /bin/zsh /bin/dash || die "invalid shell: $USER_SHELL"
+    [[ "$PASS_MIN_LEN" =~ ^[0-9]+$ ]] || die "non-numeric minimum length: $PASS_MIN_LEN"
+    (( PASS_MIN_LEN >= 1 && PASS_MIN_LEN <= 4096 )) || die "minimum length out of range: $PASS_MIN_LEN"
+    in_set "$LOCALE" en_US.UTF-8 C.UTF-8 es_AR.UTF-8 || die "invalid locale: $LOCALE"
+    in_set "$TZ_AREA" America/Argentina/Buenos_Aires UTC Etc/UTC || die "invalid time zone: $TZ_AREA"
+    in_set "$KEYMAP" latam es us || die "invalid keyboard layout: $KEYMAP"
+    [[ "$MIRROR" == https://* && "$MIRROR" =~ ^[A-Za-z0-9._/:-]+$ ]] || die "invalid mirror: $MIRROR"
+    [[ "$SECURITY" == https://* && "$SECURITY" =~ ^[A-Za-z0-9._/:-]+$ ]] || die "invalid security repo: $SECURITY"
+    [[ "$COMPONENTS" =~ ^[a-z0-9,+-]+$ ]] || die "invalid components: $COMPONENTS"
+    in_set "$ESP_SIZE" 512M 1G 2G || die "invalid ESP: $ESP_SIZE"
+    in_set "$BIOS_SIZE" 1M 2M 8M || die "invalid BIOS Boot: $BIOS_SIZE"
+    [[ ${#BOOT_LABEL} -le 11 && "$BOOT_LABEL" =~ ^[A-Za-z0-9_.:-]+$ ]] || die "invalid FAT label: $BOOT_LABEL"
+    [[ ${#ROOT_LABEL} -le 16 && "$ROOT_LABEL" =~ ^[A-Za-z0-9_.:-]+$ ]] || die "invalid root label: $ROOT_LABEL"
+    [[ ${#LUKS_LABEL} -le 32 && "$LUKS_LABEL" =~ ^[A-Za-z0-9_.:-]+$ ]] || die "invalid LUKS label: $LUKS_LABEL"
+    in_set "$PBKDF" argon2id pbkdf2 || die "invalid KDF: $PBKDF"
+    in_set "$PBKDF_MEM" 65536 131072 262144 524288 || die "invalid PBKDF memory: $PBKDF_MEM"
+    in_set "$ROOT_FS" ext4 btrfs || die "invalid rootfs: $ROOT_FS"
+    in_set "$KERNEL_HARDENING" conservative aggressive none || die "invalid hardening: $KERNEL_HARDENING"
+    in_set "$PLYMOUTH_THEME" spinfinity spinner text details none || die "invalid Plymouth theme: $PLYMOUTH_THEME"
+    in_set "$GREETER" greetd ly console || die "invalid greeter: $GREETER"
+    in_set "$WM" openbox none || die "invalid WM: $WM"
+    in_set "$COMPOSITOR" picom none || die "invalid compositor: $COMPOSITOR"
+    in_set "$BAR" tint2 none || die "invalid bar: $BAR"
+    in_set "$LAUNCHER" rofi none || die "invalid launcher: $LAUNCHER"
+    in_set "$TERMINAL" xterm alacritty both none || die "invalid terminal: $TERMINAL"
+    in_set "$FONT_PKG" fonts-jetbrains-mono fonts-dejavu-core xfonts-terminus || die "invalid font: $FONT_PKG"
+    in_set "$PIPEWIRE" minimal bluetooth none || die "invalid PipeWire: $PIPEWIRE"
+    in_set "$NETWORK" NetworkManager dhcpcd none || die "invalid network: $NETWORK"
+    in_set "$FIRMWARE" full minimal none || die "invalid firmware: $FIRMWARE"
+    in_set "$MICROCODE" both intel amd none || die "invalid microcode: $MICROCODE"
+    in_set "$DATA_POLICY" keep delete "no-backups" || die "invalid data policy: $DATA_POLICY"
+    in_set "$HOTPLUG_POLICY" allow0 require1 skip || die "invalid HOTPLUG policy: $HOTPLUG_POLICY"
+    in_set "$LIMINE_BIOS_FORCE" yes no || die "LIMINE_BIOS_FORCE must be yes/no: $LIMINE_BIOS_FORCE"
+    [[ "$SIZE_MIN_GB" =~ ^[0-9]+$ && "$SIZE_MAX_GB" =~ ^[0-9]+$ ]] || die "non-numeric size range"
+    (( SIZE_MIN_GB >= 1 && SIZE_MAX_GB <= 2000 && SIZE_MIN_GB <= SIZE_MAX_GB )) || die "invalid size range: $SIZE_MIN_GB-$SIZE_MAX_GB GB"
     if ! [[ "$CURL_RETRIES" =~ ^[0-9]+$ ]] || (( CURL_RETRIES > 10 )); then
-        die "reintentos inválidos: $CURL_RETRIES"
+        die "invalid retries: $CURL_RETRIES"
     fi
     if ! [[ "$NETWORK_TIMEOUT" =~ ^[0-9]+$ ]] || (( NETWORK_TIMEOUT < 1 || NETWORK_TIMEOUT > 120 )); then
-        die "timeout inválido: $NETWORK_TIMEOUT"
+        die "invalid timeout: $NETWORK_TIMEOUT"
     fi
-    in_set "$ZRAM_SIZE" 2048 4096 1024 || die "ZRAM inválido: $ZRAM_SIZE"
-    [[ "$BG" =~ ^[0-9A-Fa-f]{6}$ && "$FG" =~ ^[0-9A-Fa-f]{6}$ && "$ACCENT" =~ ^[0-9A-Fa-f]{6}$ ]] || die "color hexadecimal inválido"
-    is_ip "$DNS1" || die "DNS primario inválido: $DNS1 (usa IP literal)"
-    is_ip "$DNS2" || die "DNS secundario inválido: $DNS2 (usa IP literal)"
+    in_set "$ZRAM_SIZE" 2048 4096 1024 || die "invalid ZRAM: $ZRAM_SIZE"
+    [[ "$BG" =~ ^[0-9A-Fa-f]{6}$ && "$FG" =~ ^[0-9A-Fa-f]{6}$ && "$ACCENT" =~ ^[0-9A-Fa-f]{6}$ ]] || die "invalid hex colour"
+    is_ip "$DNS1" || die "invalid primary DNS: $DNS1 (use a literal IP)"
+    is_ip "$DNS2" || die "invalid secondary DNS: $DNS2 (use a literal IP)"
     for k in UEFI BIOS_BOOT UEFI_IA32 SECURE_BOOT FIREWALL APPARMOR DOAS AUDITD SSH ZRAM GUI VERIFY_GPG LIMINE_EDITOR PLYMOUTH_FALLBACK CLEAN_TRACES MAKE_HOST_BACKUP; do
-        in_set "${!k}" si no || die "$k debe ser si/no: ${!k}"
+        in_set "${!k}" yes no || die "$k must be yes/no: ${!k}"
     done
-    [[ "$SECURE_BOOT" == no ]] || die "Secure Boot debe estar desactivado"
-    if [[ "$GUI" == no && "$GREETER" != consola ]]; then
-        die "Un greeter gráfico requiere X11; elige consola o activa GUI"
+    [[ "$SECURE_BOOT" == no ]] || die "Secure Boot must be disabled"
+    if [[ "$GUI" == no && "$GREETER" != console ]]; then
+        die "A graphical greeter needs X11; choose console or enable GUI"
     fi
     if [[ "$GUI" == no ]]; then
-        # Normalización dura, venga la configuración de preguntas,
-        # --config o --resume: sin X11 no queda NINGÚN resto gráfico
-        # en las preferencias, y build_packages() tampoco lo añade.
-        WM=ninguno
-        COMPOSITOR=ninguno
-        BAR=ninguno
-        LAUNCHER=ninguno
-        TERMINAL=ninguno
+        # Hard normalization, whether the config comes from questions,
+        # --config or --resume: without X11 no graphical leftover stays
+        # in the preferences, and build_packages() will not add it either.
+        WM=none
+        COMPOSITOR=none
+        BAR=none
+        LAUNCHER=none
+        TERMINAL=none
     fi
-    if [[ "$GUI" == si && "$TERMINAL" == ninguno ]]; then
-        die "Con GUI=si necesitas una terminal gráfica (xterm, alacritty o ambas)"
+    if [[ "$GUI" == yes && "$TERMINAL" == none ]]; then
+        die "With GUI=yes you need a graphical terminal (xterm, alacritty or both)"
     fi
     if (( ! DRY_RUN && ! SIMULATE )); then
-        [[ -z "$K" || "$K" =~ ^[A-Za-z0-9._+-]+$ ]] || die "ABI de kernel inválido: $K"
+        [[ -z "$K" || "$K" =~ ^[A-Za-z0-9._+-]+$ ]] || die "invalid kernel ABI: $K"
         for k in LUKS_UUID ROOT_UUID BOOT_UUID; do
             v="${!k}"
-            [[ -z "$v" || "$v" =~ ^[A-Fa-f0-9-]{8,}$ ]] || die "$k inválido: $v"
+            [[ -z "$v" || "$v" =~ ^[A-Fa-f0-9-]{8,}$ ]] || die "invalid $k: $v"
         done
     fi
     parse_extra_packages
-    log "Revalidación estricta OK"
+    log "Strict revalidation OK"
 }
 
-# ---------------------------- explicaciones ----------------------------
-# Cada bloque se muestra ANTES de la pregunta correspondiente.
-# Tambien puedes verlos todos sin ejecutar nada con: bash install.sh --explain
-# Pulsa ? en cualquier prompt para volver a leer el bloque.
+# ---------------------------- explanations ----------------------------
+# Each block is shown BEFORE its corresponding question.
+# You can also view them all without running anything: bash install.sh --explain
+# Press ? at any prompt to read the block again.
 
 show_help() {
     [[ -n "$HELP_FN" ]] || return 0
     ui_init
-    # ? pide la explicación COMPLETA: se pagina con less si hay TTY,
-    # porque en una consola de baja resolución un bloque entero se sale
-    # de la pantalla. --explain sigue imprimiendo todo sin paginar.
+    # ? asks for the FULL explanation: it is paged with less if there is
+    # a TTY, because on a low-resolution console a whole block falls off
+    # the screen. --explain still prints everything unpaged.
     if (( HELP_FULL )); then
         HELP_FULL=0
         printf '\n'
@@ -541,11 +541,10 @@ show_help() {
         HELP_SHOWN="$HELP_FN"
         return 0
     fi
-    # Primera vez: SOLO un resumen que cabe en una pantalla pequeña
-    # (máximo 10 líneas del bloque + una línea de estado). El detalle
-    # completo, con coste/riesgo/fuentes, queda a una tecla (?) y en
-    # --explain. Así no se pierde información, pero tampoco se empuja
-    # la pregunta fuera de la pantalla.
+    # First time: ONLY a summary that fits on a small screen (at most 10
+    # lines of the block + one status line). The full detail, with
+    # cost/risk/sources, is one key away (?) and in --explain. That way
+    # no information is lost, but the question is not pushed off screen.
     if [[ "$HELP_SHOWN" != "$HELP_FN" ]]; then
         local text="" i
         local -a lines=()
@@ -557,7 +556,7 @@ show_help() {
             (( i < 10 )) || break
             printf '  %s\n' "${lines[i]}"
         done
-        printf '  %s[?] explicación completa (%d líneas) · Enter = valor por defecto%s\n' "$C_DIM" "${#lines[@]}" "$C_RESET"
+        printf '  %s[?] full explanation (%d lines) · Enter = default value%s\n' "$C_DIM" "${#lines[@]}" "$C_RESET"
         ui_rule
         HELP_SHOWN="$HELP_FN"
     fi
@@ -580,512 +579,518 @@ help_all() {
 # shellcheck disable=SC2016
 help_intro() {
     cat <<'EOF'
-=== ANTES DE EMPEZAR: que va a pasar y que NO va a pasar ===
+=== BEFORE YOU START: what will happen and what will NOT happen ===
 
-Vas a instalar Debian 13.7 "trixie" Stable SIN el instalador tradicional,
-usando debootstrap desde este live. El unico disco de la VM es /dev/sda y
-sera COMPLETAMENTE BORRADO: se destruye su tabla de particiones, se crea
-GPT de cero, se formatea una ESP FAT32 y se crea un contenedor LUKS cifrado.
+You are going to install Debian 13.7 "trixie" Stable WITHOUT the
+traditional installer, using debootstrap from this live session. The VM's
+only disk is /dev/sda and it will be COMPLETELY ERASED: its partition
+table is destroyed, a GPT is created from scratch, an ESP is formatted
+as FAT32 and a LUKS encrypted container is created.
 
-Que NO existe en este diseno:
-  - No hay segundo disco, imagen auxiliar ni carpeta compartida.
-  - No se lee ni se escribe nada en el anfitrion.
-  - No se genera ningun archivo para el anfitrion.
-  - El script no se copia a si mismo dentro del sistema instalado.
+What does NOT exist in this design:
+  - No second disk, auxiliary image or shared folder.
+  - Nothing is read from or written to the host.
+  - No file is generated for the host.
+  - The script does not copy itself into the installed system.
 
-Interfaz (pensada para una consola de baja resolucion):
-  Antes de cada bloque veras SOLO un resumen de 10 lineas como maximo,
-  que cabe en una pantalla pequena. Pulsa ? en la pregunta para abrir
-  la explicacion completa paginada con less; con --explain se imprime
-  todo de una vez. Hay colores y una barra de progreso solo si la
-  salida es una terminal real; con NO_COLOR=1 o salida capturada todo
-  queda en texto plano. Estilo tipo Arch: banner corto, menus
-  numerados, minimo ruido y ninguna pregunta sin valor por defecto.
+Interface (designed for a low-resolution console):
+  Before each block you will see ONLY a summary of 10 lines at most,
+  which fits on a small screen. Press ? at the question to open the
+  full explanation paged with less; with --explain everything is printed
+  at once. There are colours and a progress bar only if the output is a
+  real terminal; with NO_COLOR=1 or captured output everything stays
+  plain text. Arch-style: short banner, numbered menus, minimal noise
+  and no question without a default value.
 
-Donde vive todo durante la instalacion:
-  /tmp de Debian 13 es tmpfs (RAM). Ahi estan el log, el estado, los
-  respaldos, los tarballs, Zig, las cachés y las claves GPG temporales.
-  Consecuencias honestas:
-    + Cero rastros del instalador en el sistema final.
-    - Si apagas o reinicias la VM, se pierde TODO, incluido el estado.
-    - --resume solo sirve mientras esta misma sesion del live siga viva.
-    - Compilar Ly con Zig necesita ~1 GB libres en RAM; si tu VM tiene
-      poca memoria, elige greetd en vez de ly.
+Where everything lives during the installation:
+  Debian 13's /tmp is tmpfs (RAM). There live the log, the state, the
+  backups, tarballs, Zig, caches and temporary GPG keys.
+  Honest consequences:
+    + Zero traces of the installer in the final system.
+    - If you power off or reboot the VM, EVERYTHING is lost, state included.
+    - --resume only works while this same live session is still alive.
+    - Compiling Ly with Zig needs ~1 GB of free RAM; if your VM has
+      little memory, choose greetd instead of ly.
 
-Fuente: https://www.debian.org/releases/stable/release-notes/issues.en.html#the-temporary-files-directory-tmp-is-now-stored-in-a-tmpfs
-Fuente: https://www.debian.org/releases/
+Source: https://www.debian.org/releases/stable/release-notes/issues.en.html#the-temporary-files-directory-tmp-is-now-stored-in-a-tmpfs
+Source: https://www.debian.org/releases/
 EOF
 }
 
 # shellcheck disable=SC2016
 help_target() {
     cat <<'EOF'
-=== Disco destino y punto de montaje ===
+=== Target disk and mount point ===
 
-El destino esta FIJADO a /dev/sda. No se acepta otro valor, porque la VM
-tiene un solo disco y cualquier sustitucion generica podria apuntar al
-lugar equivocado. Antes de tocar nada se verifican modelo, serie, tamano,
-TRAN=usb, que no haya particiones montadas y una politica de HOTPLUG que
-se explica en el bloque siguiente.
+The target is FIXED to /dev/sda. No other value is accepted, because the
+VM has a single disk and any generic substitution could point at the
+wrong place. Before touching anything, model, serial, size, TRAN=usb,
+that no partitions are mounted, and a HOTPLUG policy (explained in the
+next block) are verified.
 
-Punto de montaje temporal: /mnt/target. Es solo un directorio del live
-donde se monta la raiz cifrada mientras se construye el sistema. No
-forma parte del sistema final; se desmonta al terminar.
+Temporary mount point: /mnt/target. It is just a directory of the live
+session where the encrypted root is mounted while the system is built.
+It is not part of the final system; it is unmounted at the end.
 
-Si el preflight falla aqui, NO continues: significa que /dev/sda no es
-el USB que esperabas o que esta en uso.
+If the preflight fails here, do NOT continue: it means /dev/sda is not
+the USB you expected or it is in use.
 
-Recomendado: deja /dev/sda y /mnt/target tal cual.
+Recommended: leave /dev/sda and /mnt/target as they are.
 EOF
 }
 
 # shellcheck disable=SC2016
 help_disk_checks() {
     cat <<'EOF'
-=== Guardas del disco: HOTPLUG, TRAN y tamano ===
+=== Disk guards: HOTPLUG, TRAN and size ===
 
-Estas tres comprobaciones existen para NO borrar por accidente el disco
-del anfitrion. Ahora se pueden ajustar porque una VM no se comporta como
-un pendrive fisico.
+These three checks exist so you do NOT accidentally erase the host's
+disk. They can now be adjusted because a VM does not behave like a
+physical pendrive.
 
 HOTPLUG (lsblk -dn -o HOTPLUG):
-  En un USB real conectado en caliente suele valer 1. En QEMU, cuando el
-  disco se presenta con usb-storage antes de arrancar, es habitual ver 0.
-  En TU salida se ve: TRAN=usb  HOTPLUG=0  SIZE 57.7G. Exigir 1 a ciegas
-  bloqueaba la instalacion aunque el disco fuera el correcto.
-  Opciones:
-    permitir0 (RECOMENDADO): acepta 0 o 1; avisa si es 0. Pensado para VM.
-    exigir1  : solo acepta 1. Util si mas adelante conectas la USB a una
-               PC fisica y quieres la comprobacion clasica.
-    omitir   : no mira HOTPLUG. Menos seguro; solo si sabes por que.
-  Sea cual sea la opcion, se sigue exigiendo TRAN=usb, /dev/sda fijo,
-  modelo/serie/tamano visibles, sin particiones montadas y la
-  confirmacion literal "BORRAR /dev/sda". HOTPLUG nunca fue el unico
-  guardia anti-anfitrion.
+  On a real hot-plugged USB it is usually 1. In QEMU, when the disk is
+  presented with usb-storage before boot, seeing 0 is normal.
+  In YOUR output you see: TRAN=usb  HOTPLUG=0  SIZE 57.7G. Blindly
+  requiring 1 blocked the installation even though the disk was right.
+  Options:
+    allow0   (RECOMMENDED): accepts 0 or 1; warns if it is 0. Meant for VMs.
+    require1 : only accepts 1. Useful if you later plug the USB into a
+               physical PC and want the classic check.
+    skip     : does not look at HOTPLUG. Less safe; only if you know why.
+  Whichever the option, TRAN=usb, fixed /dev/sda, visible model/serial/
+  size, no mounted partitions and the literal "ERASE /dev/sda"
+  confirmation are still required. HOTPLUG was never the only
+  anti-host guard.
 
 TRAN (lsblk -dn -o TRAN):
-  Debe ser "usb". Es la comprobacion mas fiable en este escenario: si
-  /dev/sda fuera un disco SATA/virtio/NVMe del anfitrion, TRAN no seria
-  usb y el script abortaria. No es configurable a proposito.
+  It must be "usb". It is the most reliable check in this scenario: if
+  /dev/sda were a SATA/virtio/NVMe disk of the host, TRAN would not be
+  usb and the script would abort. Deliberately not configurable.
 
-TAMANO (lsblk -dn -o SIZE -b, en bytes):
-  Cuidado con las unidades: "57.7G" en lsblk son GiB (base 1024), que
-  equivalen a ~61 900 000 000 bytes (61.9 GB decimales). El guard anterior
-  aceptaba solo 58 000 000 000 - 61 000 000 000 bytes y por eso rechazaba
-  tu disco de 57.7G por apenas 900 MB de diferencia.
-  Ahora se pregunta un rango en GB decimales. Por defecto 50-70 GB, que
-  cubre tanto 57.7 GiB (~61.9 GB) como 59 120 MiB (~61.99 GB). Si usas
-  otra USB de distinta capacidad, ajusta los dos numeros.
+SIZE (lsblk -dn -o SIZE -b, in bytes):
+  Mind the units: "57.7G" in lsblk is GiB (base 1024), which equals
+  ~61,900,000,000 bytes (61.9 decimal GB). The previous guard accepted
+  only 58,000,000,000 - 61,000,000,000 bytes and therefore rejected
+  your 57.7G disk by barely 900 MB.
+  Now a range in decimal GB is asked. Default 50-70 GB, which covers
+  both 57.7 GiB (~61.9 GB) and 59,120 MiB (~61.99 GB). If you use
+  another USB of a different capacity, adjust the two numbers.
 
-RED:
-  Reintentos y timeout de curl. Con 3 reintentos y 15 s de conexion, un
-  mirror que titubea no aborta a la primera. Sube el timeout si tu red
-  es lenta; bajalo si quieres fallar rapido.
+NETWORK:
+  curl retries and timeout. With 3 retries and a 15 s connection
+  timeout, a mirror that stumbles does not abort at the first try.
+  Raise the timeout if your network is slow; lower it to fail fast.
 
-Fuente: https://manpages.debian.org/trixie/util-linux/lsblk.8.en.html
-Fuente: https://www.qemu.org/docs/master/system/devices/usb.html
-Fuente: https://manpages.debian.org/trixie/curl/curl.1.en.html
+Source: https://manpages.debian.org/trixie/util-linux/lsblk.8.en.html
+Source: https://www.qemu.org/docs/master/system/devices/usb.html
+Source: https://manpages.debian.org/trixie/curl/curl.1.en.html
 EOF
 }
 
 # shellcheck disable=SC2016
 help_workdir() {
     cat <<'EOF'
-=== Estado, respaldos y duracion de los datos ===
+=== State, backups and data lifetime ===
 
-El script usa tres directorios dentro de /tmp (RAM):
+The script uses three directories inside /tmp (RAM):
 
-  state/      etapa actual y preferencias NO secretas para --resume.
-  artifacts/  log, primeros 16 MiB del disco, tabla GPT anterior,
-              cabecera LUKS, UUIDs, limine.conf, crypttab, fstab y GPT final.
-  scratch/    tarballs, Zig, cachés de compilacion, claves GPG y archivos
-              de contrasena temporales. Se BORRA al salir del script.
+  state/      current stage and NON-secret preferences for --resume.
+  artifacts/  log, first 16 MiB of the disk, previous GPT table,
+              LUKS header, UUIDs, limine.conf, crypttab, fstab and final GPT.
+  scratch/    tarballs, Zig, build caches, GPG keys and temporary
+              password files. DELETED when the script exits.
 
-Pregunta: que hacer con state/ y artifacts/ al terminar.
+Question: what to do with state/ and artifacts/ when finished.
 
-  conservar (recomendado): siguen en RAM hasta que apagues la VM. Asi
-      puedes usar --resume si algo falla, y puedes leer el log con less.
-      Se pierden igual al apagar; no queda nada en el disco instalado.
-  borrar: se eliminan al salir. Mas limpio, pero --resume dejara de
-      funcionar y perderas la cabecera LUKS de respaldo.
-  sin respaldos: no se guardan ni GPT ni cabecera LUKS. Mas rapido,
-      pero si el disco se corrompe no hay recuperacion.
+  keep (recommended): they stay in RAM until you power off the VM. That
+      way you can use --resume if something fails, and you can read the
+      log with less. They are lost on poweroff anyway; nothing remains
+      on the installed disk.
+  delete: removed on exit. Cleaner, but --resume will stop working and
+      you will lose the LUKS header backup.
+  no-backups: neither GPT nor LUKS header is saved. Faster, but if the
+      disk gets corrupted there is no recovery.
 
-AVISO: la cabecera LUKS es la unica copia de seguridad del cifrado. Si
-quieres conservarla de verdad, copiala ANTES de apagar la VM a otro
-servidor con curl/scp. El script no te impone donde.
+WARNING: the LUKS header is the only backup copy of the encryption. If
+you really want to keep it, copy it BEFORE powering off the VM to
+another server with curl/scp. The script does not impose where.
 
-Recomendado: "conservar". Es gratis y no deja rastros.
-Fuente: https://manpages.debian.org/trixie/cryptsetup-bin/cryptsetup-luksHeaderBackup.8.en.html
+Recommended: "keep". It is free and leaves no traces.
+Source: https://manpages.debian.org/trixie/cryptsetup-bin/cryptsetup-luksHeaderBackup.8.en.html
 EOF
 }
 
 # shellcheck disable=SC2016
 help_identity() {
     cat <<'EOF'
-=== Hostname, usuario y contrasenas ===
+=== Hostname, user and passwords ===
 
-Hostname: nombre corto, minusculas, sin espacios. Es el nombre de la
-maquina en la red; no afecta al cifrado ni al arranque.
+Hostname: short name, lowercase, no spaces. It is the machine's name on
+the network; it does not affect encryption or booting.
 
-Usuario: se crea con home en /home y se mete en los grupos sudo, audio
-y video. No se crea ningun otro usuario interactivo.
+User: created with home in /home and added to the sudo, audio and video
+groups. No other interactive user is created.
 
-Shell: bash es el mas compatible; zsh anade un paquete; dash es minimo
-y poco comodo como shell interactiva.
+Shell: bash is the most compatible; zsh adds a package; dash is minimal
+and not very comfortable as an interactive shell.
 
-Longitud minima de contrasenas (pregunta propia):
-  Por defecto 1 = SIN minimo. Podes poner cualquier numero de 1 a 4096
-  si queres imponer uno vos mismo. YA NO hay un "12 obligatorio".
-  Con 1 se acepta desde un solo caracter hasta una frase larga.
-  Si elegis menos de 12 caracteres el script AVISA en pantalla, pero
-  NO te bloquea: la decision es tuya.
+Minimum password length (its own question):
+  Default 1 = NO minimum. You can set any number from 1 to 4096 if you
+  want to impose one yourself. There is NO "mandatory 12" anymore.
+  With 1, anything from a single character to a long passphrase is accepted.
+  If you choose fewer than 12 characters the script WARNS on screen, but
+  does NOT block you: the decision is yours.
 
-Contrasenas (usuario, root y frase LUKS):
-  - Se piden DOS veces y no se muestran.
-  - Se aceptan TODOS los caracteres ASCII imprimibles (0x21 a 0x7E):
-    letras, numeros y signos como ! @ # $ % ^ & * ( ) - _ = + [ ] { }
-    ; ' , . < > / ? ~ " \ ` | e incluso ':' .
-  - NO se aceptan: espacios, tabuladores, saltos de linea, controles,
-    acentos, eñes, emojis ni cualquier byte UTF-8 no ASCII.
-  - '?' y '??' SON contrasenas validas. Para releer esta ayuda en el
-    prompt de contrasena pulsa ENTER SIN ESCRIBIR NADA (no uses '?',
-    porque ahora '?' puede ser tu contrasena). En las preguntas
-    normales si se usa '?'.
-  - Motivo de excluir acentos: la frase LUKS la pide el initramfs ANTES
-    de cargar el teclado completo. Si usas acentos, eñes o simbolos que
-    cambian entre el mapa latam y us, podras escribirla en el live pero
-    NO al arrancar, y el sistema parecera "no aceptar la contrasena".
-    Es la causa mas comun de bloqueo en instalaciones cifradas.
-  - Para que una contrasena corta NO sea rechazada despues por PAM,
-    el script usa `chpasswd -c YESCRYPT`: cifra directamente con libc
-    en lugar de pasar por pam_unix "obscure" / pam_pwquality.
-  - Para lo mismo en LUKS se usa `--force-password`, que desactiva el
-    control de calidad de contrasena de cryptsetup si el build lo trae.
-  - La frase se escribe en un archivo temporal SIN salto de linea final;
-    `--key-file -` lee stdin y NO corta en saltos de linea, por eso lo
-    que escribis es exactamente la frase, sin un \n escondido.
-  - La frase LUKS NO se guarda en el state ni en el log. Si reinicias,
-    tendras que volver a escribirla para --resume o --refresh-limine.
+Passwords (user, root and LUKS passphrase):
+  - Asked TWICE and never shown.
+  - ALL printable ASCII characters (0x21 to 0x7E) are accepted:
+    letters, numbers and symbols like ! @ # $ % ^ & * ( ) - _ = + [ ] { }
+    ; ' , . < > / ? ~ " \ ` | and even ':' .
+  - NOT accepted: spaces, tabs, line breaks, control characters,
+    accented letters, eñes, emojis or any non-ASCII UTF-8 byte.
+  - '?' and '??' ARE valid passwords. To re-read this help at a password
+    prompt press ENTER WITHOUT TYPING ANYTHING (do not use '?', because
+    '?' can now be your password). In normal questions '?' is used.
+  - Why accents are excluded: the initramfs asks for the LUKS passphrase
+    BEFORE loading the full keyboard layout. If you use accents, eñes or
+    symbols that differ between the latam and us maps, you will be able
+    to type it in the live session but NOT at boot, and the system will
+    look like it "does not accept the password". It is the most common
+    cause of lockout in encrypted installations.
+  - So a short password is not rejected later by PAM, the script uses
+    `chpasswd -c YESCRYPT`: it hashes directly with libc instead of going
+    through pam_unix "obscure" / pam_pwquality.
+  - For the same reason, LUKS uses `--force-password`, which disables
+    cryptsetup's password quality check if the build ships it.
+  - The passphrase is written to a temporary file WITHOUT a trailing
+    newline; `--key-file -` reads stdin and does NOT split on newlines,
+    so what you type is exactly the passphrase, with no hidden \n.
+  - The LUKS passphrase is NOT saved in the state or the log. If you
+    reboot, you will have to type it again for --resume or --refresh-limine.
 
-AVISO DE SEGURIDAD (sin bloqueo): una contrasena corta es mucho mas
-vulnerable a fuerza bruta, sobre todo la frase LUKS. Si podes, usala
-larga; si no, el script igual te deja.
+SECURITY WARNING (non-blocking): a short password is far more
+vulnerable to brute force, especially the LUKS passphrase. If you can,
+make it long; if not, the script lets you anyway.
 
-Recomendado: frase LUKS larga pero ASCII (p. ej. 4 palabras sin tildes
-separadas por guiones), distinta de la contrasena del usuario.
-Fuente: https://manpages.debian.org/trixie/passwd/chpasswd.8.en.html
-Fuente: https://manpages.debian.org/trixie/cryptsetup-bin/cryptsetup-luksFormat.8.en.html
-Fuente: https://www.debian.org/doc/manuals/securing-debian-manual/ch04s11.en.html
+Recommended: a long but ASCII LUKS passphrase (e.g. 4 words without
+accents separated by hyphens), different from the user password.
+Source: https://manpages.debian.org/trixie/passwd/chpasswd.8.en.html
+Source: https://manpages.debian.org/trixie/cryptsetup-bin/cryptsetup-luksFormat.8.en.html
+Source: https://www.debian.org/doc/manuals/securing-debian-manual/ch04s11.en.html
 EOF
 }
 
 # shellcheck disable=SC2016
 help_locale() {
     cat <<'EOF'
-=== Locale, zona horaria y teclado ===
+=== Locale, time zone and keyboard ===
 
-Locale: en_US.UTF-8 mantiene los mensajes del sistema en ingles y UTF-8,
-que es lo mas predecible para diagnosticar errores de arranque. C.UTF-8
-es aun mas minimo (sin mensajes traducidos ni formato regional).
-es_AR.UTF-8 traduce mensajes, pero los logs de error aparecen en español
-y a veces es mas dificil buscarlos en documentacion oficial.
+Locale: en_US.UTF-8 keeps system messages in English and UTF-8, which is
+the most predictable for diagnosing boot errors. C.UTF-8 is even more
+minimal (no translated messages or regional formatting).
+es_AR.UTF-8 translates messages, but error logs appear in Spanish and
+are sometimes harder to search for in official documentation.
 
-Zona horaria: solo afecta a la hora mostrada y a los logs. La hora del
-hardware se trata como local; en una USB que se mueve entre PCs, UTC es
-la opcion mas neutra. America/Argentina/Buenos_Aires es la correcta si
-siempre usaras la USB en Argentina.
+Time zone: only affects the displayed time and the logs. Hardware time
+is treated as local; on a USB that moves between PCs, UTC is the most
+neutral option. America/Argentina/Buenos_Aires is right if you will
+always use the USB in Buenos Aires.
 
-Teclado: latam es el mapa con eñe y acentos en consola y X11. Tambien se
-copia al initramfs con KEYMAP=y para que la frase LUKS se escriba igual.
-Ojo: sigue siendo recomendable que la frase sea ASCII, porque el cambio
-de mapa dentro del initramfs no es identico al de una sesion completa.
+Keyboard: latam is the map with eñe and accents in console and X11. It is
+also copied into the initramfs with KEYMAP=y so the LUKS passphrase is
+typed the same way. Note: an ASCII passphrase is still recommended,
+because the map switch inside the initramfs is not identical to a full
+session.
 
-Recomendado: en_US.UTF-8 + tu zona + latam, con frase LUKS ASCII.
-Fuente: https://manpages.debian.org/trixie/locales/locale.gen.5.en.html
-Fuente: https://manpages.debian.org/trixie/keyboard-configuration/keyboard.5.en.html
+Recommended: en_US.UTF-8 + your zone + latam, with an ASCII LUKS passphrase.
+Source: https://manpages.debian.org/trixie/locales/locale.gen.5.en.html
+Source: https://manpages.debian.org/trixie/keyboard-configuration/keyboard.5.en.html
 EOF
 }
 
 # shellcheck disable=SC2016
 help_mirror() {
     cat <<'EOF'
-=== Mirror de Debian y mirror de seguridad ===
+=== Debian mirror and security mirror ===
 
-Se verifica que el mirror sirva dists/trixie/Release con Codename: trixie
-y que el mirror de seguridad sirva trixie-security. No se mezcla con
-testing, sid, backports ni otras ramas.
+It is verified that the mirror serves dists/trixie/Release with
+Codename: trixie and that the security mirror serves trixie-security.
+No mixing with testing, sid, backports or other branches.
 
-Opciones comprobadas en la investigacion previa:
-  mirror.sitsa.com.ar       Argentina. Sirve trixie 13.7.
-  debian.c3sl.ufpr.br       Brasil. Sirve trixie y tambien trixie-security.
-  deb.debian.org            Redirige al mirror mas cercano. Generico.
+Options verified in prior research:
+  mirror.sitsa.com.ar       Buenos Aires. Serves trixie 13.7.
+  debian.c3sl.ufpr.br       Brasil. Serves trixie and also trixie-security.
+  deb.debian.org            Redirects to the nearest mirror. Generic.
 
-Si eliges el de Brasil, el script usa automaticamente su ruta
-debian-security; si eliges Argentina o deb.debian.org, usa
-security.debian.org. Puedes corregir la URL de seguridad a mano.
+If you choose Brasil, the script automatically uses its debian-security
+path; if you choose Buenos Aires or deb.debian.org, it uses
+security.debian.org. You can correct the security URL by hand.
 
-Por que importa: debootstrap y apt verifican firmas OpenPGP de Release.
-Un mirror desactualizado o que no sirva seguridad rompe la instalacion
-o deja el sistema sin parches.
+Why it matters: debootstrap and apt verify OpenPGP signatures of
+Release. An outdated mirror, or one that does not serve security,
+breaks the installation or leaves the system without patches.
 
-Recomendado: el de Argentina; el de Brasil como respaldo.
-Fuente: https://www.debian.org/mirror/list-full
-Fuente: https://manpages.debian.org/trixie/debootstrap/debootstrap.8.en.html
+Recommended: Buenos Aires; Brasil as backup.
+Source: https://www.debian.org/mirror/list-full
+Source: https://manpages.debian.org/trixie/debootstrap/debootstrap.8.en.html
 EOF
 }
 
 # shellcheck disable=SC2016
 help_components() {
     cat <<'EOF'
-=== Componentes APT ===
+=== APT components ===
 
-main                Solo software libre, sin firmware propietario.
-contrib             Software libre que depende de algo no libre.
-non-free-firmware   Firmware propietario necesario para muchas Wi-Fi,
-                    GPUs y tarjetas de red. En trixie es un componente
-                    separado, NO parte de non-free.
-non-free            Software propietario en general. NO se usa aqui.
+main                Free software only, no proprietary firmware.
+contrib             Free software that depends on something non-free.
+non-free-firmware   Proprietary firmware needed by many Wi-Fi cards,
+                    GPUs and network cards. In trixie it is a separate
+                    component, NOT part of non-free.
+non-free            Proprietary software in general. NOT used here.
 
-El perfil de firmware que elijas mas abajo reescribe este valor:
-  completo / minimo -> main,contrib,non-free-firmware
-  ninguno           -> main
+The firmware profile you choose below rewrites this value:
+  full / minimal -> main,contrib,non-free-firmware
+  none           -> main
 
-NO se anade non-free: no hace falta para arrancar y evita bloat. Si mas
-adelante necesitas un driver propietario, puedes editar
-/etc/apt/sources.list.d/debian.sources en el sistema ya instalado.
+non-free is NOT added: it is not needed to boot and avoids bloat. If you
+later need a proprietary driver, you can edit
+/etc/apt/sources.list.d/debian.sources in the installed system.
 
-Formato interno vs formato del archivo:
-  En las preguntas, --config y `debootstrap --components` se escriben
-  SEPARADOS POR COMAS (main,contrib,non-free-firmware). Pero debian.sources
-  es deb822 y `Components:` exige ESPACIOS, no comas: con comas APT intenta
-  buscar un unico componente llamado "main,contrib,non-free-firmware" y
-  emite "Skipping acquire of configured file ... component misspelt".
-  El script convierte las comas a espacios al escribir el archivo y borra
-  el /etc/apt/sources.list de una linea que dejo debootstrap, para que no
-  haya fuentes duplicadas. Asi tambien entran trixie-updates y
-  trixie-security, que con el error quedaban sin indices de paquetes.
+Internal format vs file format:
+  In questions, --config and `debootstrap --components` they are written
+  COMMA-SEPARATED (main,contrib,non-free-firmware). But debian.sources
+  is deb822 and `Components:` demands SPACES, not commas: with commas APT
+  tries to find a single component named "main,contrib,non-free-firmware"
+  and emits "Skipping acquire of configured file ... component misspelt".
+  The script converts commas to spaces when writing the file and deletes
+  the one-line /etc/apt/sources.list left by debootstrap, so there are no
+  duplicate sources. That way trixie-updates and trixie-security also get
+  in, which with the error were left without package indices.
 
-Recomendado: deja que el perfil de firmware decida; no escribas a mano.
-Fuente: https://www.debian.org/releases/stable/release-notes/index.en.html
-Fuente: https://manpages.debian.org/trixie/apt/sources.list.5.en.html
-Fuente: https://manpages.debian.org/trixie/debootstrap/debootstrap.8.en.html
+Recommended: let the firmware profile decide; do not type it by hand.
+Source: https://www.debian.org/releases/stable/release-notes/index.en.html
+Source: https://manpages.debian.org/trixie/apt/sources.list.5.en.html
+Source: https://manpages.debian.org/trixie/debootstrap/debootstrap.8.en.html
 EOF
 }
 
 # shellcheck disable=SC2016
 help_firmware() {
     cat <<'EOF'
-=== Perfil de firmware (compatibilidad multi-PC) ===
+=== Firmware profile (multi-PC compatibility) ===
 
- completo : instala firmware-linux-free, firmware-amd-graphics,
-            firmware-intel-graphics, firmware-nvidia-graphics,
-            firmware-misc-nonfree, firmware-realtek, firmware-iwlwifi,
-            firmware-atheros, firmware-brcm80211, firmware-mediatek.
-            Maximiza la probabilidad de que la USB arranque con red y
-            graficos en PCs distintas. Coste: ~200-300 MB mas.
- minimo   : firmware-linux-free, firmware-realtek, firmware-iwlwifi,
-            firmware-misc-nonfree. Cubre lo mas comun (Ethernet/Wi-Fi).
- ninguno  : solo main. Sistema mas pequeno, pero una Wi-Fi Intel/Realtek
-            o una GPU que requiera firmware puede no funcionar hasta que
-            instales el paquete a mano con cable.
+ full    : installs firmware-linux-free, firmware-amd-graphics,
+           firmware-intel-graphics, firmware-nvidia-graphics,
+           firmware-misc-nonfree, firmware-realtek, firmware-iwlwifi,
+           firmware-atheros, firmware-brcm80211, firmware-mediatek.
+           Maximizes the chance that the USB boots with network and
+           graphics on different PCs. Cost: ~200-300 MB more.
+ minimal : firmware-linux-free, firmware-realtek, firmware-iwlwifi,
+           firmware-misc-nonfree. Covers the most common (Ethernet/Wi-Fi).
+ none    : main only. Smaller system, but an Intel/Realtek Wi-Fi or a
+           GPU that needs firmware may not work until you install the
+           package by hand over a cable.
 
-Ten en cuenta que esto NO garantiza compatibilidad universal: algunos
-dispositivos necesitan microcodigo, modulos del kernel o controladores
-que no estan en Debian. Es una cobertura razonable, no una promesa.
+Note that this does NOT guarantee universal compatibility: some devices
+need microcode, kernel modules or drivers that are not in Debian. It is
+reasonable coverage, not a promise.
 
-Recomendado: "completo" en una USB portable que se movera entre PCs.
-Fuente: https://packages.debian.org/trixie/firmware-misc-nonfree
-Fuente: https://wiki.debian.org/Firmware
+Recommended: "full" on a portable USB that will move between PCs.
+Source: https://packages.debian.org/trixie/firmware-misc-nonfree
+Source: https://wiki.debian.org/Firmware
 EOF
 }
 
 # shellcheck disable=SC2016
 help_microcode() {
     cat <<'EOF'
-=== Microcodigo de CPU ===
+=== CPU microcode ===
 
- intel-microcode : actualiza microcodigo de procesadores Intel.
- amd64-microcode : actualiza microcodigo de procesadores AMD.
- ambos           : instala los dos. Son pocos KB y cada uno solo actua
-                   si detecta su CPU. Es la opcion mas portable.
- ninguno         : no se instala. El kernel usara el microcodigo que ya
-                   traiga la BIOS/UEFI de cada PC.
+ intel-microcode : updates microcode of Intel processors.
+ amd64-microcode : updates microcode of AMD processors.
+ both            : installs both. They are a few KB and each only acts
+                   if it detects its CPU. It is the most portable option.
+ none            : not installed. The kernel will use the microcode that
+                   each PC's BIOS/UEFI already carries.
 
-El microcodigo se carga muy al principio del arranque y corrige erratas
-de CPU y algunas mitigaciones. No sustituye a actualizar el firmware de
-la placa, pero es barato y mejora estabilidad.
+Microcode is loaded very early in boot and fixes CPU errata and some
+mitigations. It does not replace updating the board firmware, but it is
+cheap and improves stability.
 
-Recomendado: "ambos" para una USB que se usa en varias maquinas.
-Fuente: https://packages.debian.org/trixie/intel-microcode
-Fuente: https://packages.debian.org/trixie/amd64-microcode
+Recommended: "both" for a USB used on several machines.
+Source: https://packages.debian.org/trixie/intel-microcode
+Source: https://packages.debian.org/trixie/amd64-microcode
 EOF
 }
 
 # shellcheck disable=SC2016
 help_partitions() {
     cat <<'EOF'
-=== Tamano de ESP, BIOS Boot y etiquetas ===
+=== ESP size, BIOS Boot and labels ===
 
-GPT resultante:
-  p1  ef02  BIOS Boot     1-8 MiB   -> para Limine en BIOS/legacy.
-  p2  ef00  ESP FAT32     512M/1G/2G -> montada en /boot SIN cifrar.
-  p3  8309  LUKS          resto     -> raiz cifrada ext4/btrfs dentro.
+Resulting GPT:
+  p1  ef02  BIOS Boot     1-8 MiB   -> for Limine on BIOS/legacy.
+  p2  ef00  ESP FAT32     512M/1G/2G -> mounted at /boot UNENCRYPTED.
+  p3  8309  LUKS          the rest  -> encrypted ext4/btrfs root inside.
 
-Por que /boot va SIN cifrar: Limine no lee LUKS, LVM ni ext4 para
-encontrar vmlinuz e initrd.img. El kernel, el initramfs y limine.conf
-deben estar en una particion que el firmware y Limine puedan leer antes
-de pedir la frase. El initramfs es quien abre cryptroot despues.
+Why /boot goes UNENCRYPTED: Limine cannot read LUKS, LVM or ext4 to
+find vmlinuz and initrd.img. The kernel, the initramfs and limine.conf
+must be on a partition that the firmware and Limine can read before
+asking for the passphrase. The initramfs is what opens cryptroot later.
 
-Tamano de ESP: las notas de trixie piden AL MENOS 768 MB en /boot con
-unos 300 MB libres, porque kernel+firmware crecieron mucho. 512M puede
-quedar justo si eliges firmware completo y varios kernels. 1G es el
-equilibrio; 2G es holgado y cuesta ~1 GB menos de raiz.
+ESP size: the trixie notes ask for AT LEAST 768 MB in /boot with about
+300 MB free, because kernel+firmware grew a lot. 512M can be tight if
+you choose the full firmware profile and several kernels. 1G is the
+balance; 2G is roomy and costs ~1 GB less of root.
 
-BIOS Boot: 2M basta para el stage de Limine en GPT. 8M es margen extra.
+BIOS Boot: 2M is enough for Limine's stage on GPT. 8M is extra margin.
 
-Etiquetas: FAT32 admite maximo 11 caracteres; se validan. La etiqueta
-LUKS es informativa (udev), no afecta a crypttab, que usa UUID.
+Labels: FAT32 allows at most 11 characters; they are validated. The
+LUKS label is informational (udev), it does not affect crypttab, which
+uses the UUID.
 
-Herramientas de chequeo que el script instala EN EL SISTEMA DESTINO:
-  e2fsprogs   -> fsck.ext4  (raiz ext4 y el hook fsck de initramfs-tools)
-  dosfstools  -> fsck.vfat  (ESP /boot en FAT32)
-  btrfs-progs -> fsck.btrfs (solo si eliges btrfs como raiz)
-  zstd        -> compresor del initramfs; sin el, initramfs-tools avisa
+Check tools the script installs INTO THE TARGET SYSTEM:
+  e2fsprogs   -> fsck.ext4  (ext4 root and initramfs-tools' fsck hook)
+  dosfstools  -> fsck.vfat  (ESP /boot on FAT32)
+  btrfs-progs -> fsck.btrfs (only if you choose btrfs as root)
+  zstd        -> initramfs compressor; without it, initramfs-tools warns
                  "W: No zstd in /usr/bin:/sbin:/bin, using gzip".
-En trixie, initramfs-tools-core depende de
-`logsave | e2fsprogs (<< 1.45.3-1~)`; APT puede elegir logsave y NO
-instalar e2fsprogs. Entonces update-initramfs avisa:
+On trixie, initramfs-tools-core depends on
+`logsave | e2fsprogs (<< 1.45.3-1~)`; APT may choose logsave and NOT
+install e2fsprogs. Then update-initramfs warns:
   W: /sbin/fsck.ext4 doesn't exist, can't install to initramfs
-Por eso el script pide e2fsprogs y dosfstools explicitamente: el initramfs
-puede comprobar/reparar la raiz y el sistema puede chequear /boot.
+That is why the script asks for e2fsprogs and dosfstools explicitly: the
+initramfs can check/repair the root and the system can check /boot.
 
-Recomendado: ESP 1G, BIOS Boot 2M, etiquetas por defecto.
-Fuente: https://www.debian.org/releases/stable/release-notes/issues.en.html#ensure-boot-has-enough-free-space
-Fuente: https://github.com/Limine-Bootloader/Limine/blob/trunk/FAQ.md
-Fuente: https://manpages.debian.org/trixie/dosfstools/mkfs.fat.8.en.html
-Fuente: https://sources.debian.org/src/initramfs-tools/0.148.4/hooks/fsck/
-Fuente: https://packages.debian.org/trixie/amd64/e2fsprogs/filelist
-Fuente: https://packages.debian.org/trixie/amd64/dosfstools/filelist
+Recommended: ESP 1G, BIOS Boot 2M, default labels.
+Source: https://www.debian.org/releases/stable/release-notes/issues.en.html#ensure-boot-has-enough-free-space
+Source: https://github.com/Limine-Bootloader/Limine/blob/trunk/FAQ.md
+Source: https://manpages.debian.org/trixie/dosfstools/mkfs.fat.8.en.html
+Source: https://sources.debian.org/src/initramfs-tools/0.148.4/hooks/fsck/
+Source: https://packages.debian.org/trixie/amd64/e2fsprogs/filelist
+Source: https://packages.debian.org/trixie/amd64/dosfstools/filelist
 EOF
 }
 
 # shellcheck disable=SC2016
 help_luks() {
     cat <<'EOF'
-=== LUKS2: KDF y memoria Argon2id ===
+=== LUKS2: KDF and Argon2id memory ===
 
-argon2id (recomendado): KDF moderno, resistente a GPUs/ASIC. Consume
-memoria y CPU al abrir el disco. Opciones de memoria:
-  65536 KiB  = 64 MiB   -> abre rapido en cualquier PC, incluidas VMs
-                           con 2 GB de RAM. RECOMENDADO para USB portable.
-  131072 KiB = 128 MiB  -> mas resistencia, apertura algo mas lenta.
-  262144 KiB = 256 MiB  -> puede tardar y fallar en equipos con poca RAM.
-  524288 KiB = 512 MiB  -> NO recomendado en una USB que se movera entre
-                           PCs: cryptsetup puede reducirlo, pero el
-                           benchmark y el consumo al desbloquear son altos.
+argon2id (recommended): modern KDF, resistant to GPUs/ASICs. It uses
+memory and CPU when opening the disk. Memory options:
+  65536 KiB  = 64 MiB   -> opens fast on any PC, including VMs with
+                           2 GB of RAM. RECOMMENDED for a portable USB.
+  131072 KiB = 128 MiB  -> more resistance, somewhat slower opening.
+  262144 KiB = 256 MiB  -> can be slow and fail on low-RAM machines.
+  524288 KiB = 512 MiB  -> NOT recommended on a USB that will move
+                           between PCs: cryptsetup may reduce it, but
+                           the benchmark and unlock cost are high.
 
-pbkdf2: KDF antiguo, solo tiempo/iteraciones, sin coste de memoria. Es
-mas compatible con equipos muy viejos y con initramfs minimos, pero es
-mucho mas debil frente a fuerza bruta con GPU. Eligelo solo si tuviste
-problemas reales con argon2id.
+pbkdf2: old KDF, time/iterations only, no memory cost. It is more
+compatible with very old machines and minimal initramfs setups, but it
+is much weaker against GPU brute force. Choose it only if you had real
+problems with argon2id.
 
-El script usa --type luks2, --label, --key-file - (la frase se pasa por
-stdin desde un archivo temporal en scratch/ con umask 077) y hace un
-luksHeaderBackup en RAM. crypttab luego usa UUID, no /dev/sda3, para que
-el orden de discos no rompa el arranque. Se anade --force-password para
-que el control de calidad de contrasena (pwquality/passwdqc, si el build
-de cryptsetup lo trae) NO rechace una frase corta elegida por el usuario.
+The script uses --type luks2, --label, --key-file - (the passphrase is
+passed via stdin from a temporary file in scratch/ with umask 077) and
+makes a luksHeaderBackup in RAM. crypttab then uses the UUID, not
+/dev/sda3, so disk order cannot break booting. --force-password is
+added so the password quality check (pwquality/passwdqc, if the
+cryptsetup build ships it) does NOT reject a short passphrase chosen by
+the user.
 
-Recomendado: argon2id con 65536 KiB.
-Fuente: https://manpages.debian.org/trixie/cryptsetup-bin/cryptsetup-luksFormat.8.en.html
-Fuente: https://manpages.debian.org/trixie/cryptsetup/crypttab.5.en.html
+Recommended: argon2id with 65536 KiB.
+Source: https://manpages.debian.org/trixie/cryptsetup-bin/cryptsetup-luksFormat.8.en.html
+Source: https://manpages.debian.org/trixie/cryptsetup/crypttab.5.en.html
 EOF
 }
 
 # shellcheck disable=SC2016
 help_rootfs() {
     cat <<'EOF'
-=== Sistema de archivos de la raiz cifrada ===
+=== Encrypted root filesystem ===
 
-ext4 : maduro, predecible, arranque y recuperacion muy documentados.
-       Menos memoria, menos sorpresas con initramfs. RECOMENDADO.
-btrfs: compresion zstd:1, snapshots y checksums. Anade btrfs-progs al
-       initramfs y al sistema. En una USB puede ser util, pero si el
-       initramfs no incluye bien el modulo o hay cortes de energia, la
-       recuperacion es mas delicada. No uses snapshots sin saber como
-       se comportan con LUKS.
+ext4 : mature, predictable, very well documented boot and recovery.
+       Less memory, fewer surprises with the initramfs. RECOMMENDED.
+btrfs: zstd:1 compression, snapshots and checksums. Adds btrfs-progs to
+       the initramfs and the system. On a USB it can be useful, but if
+       the initramfs does not include the module properly or there are
+       power cuts, recovery is trickier. Do not use snapshots without
+       knowing how they behave with LUKS.
 
-Ambos van DENTRO de /dev/mapper/cryptroot, nunca en la ESP. fstab usa
-UUID del filesystem interior, y crypttab usa UUID de la particion LUKS.
+Both go INSIDE /dev/mapper/cryptroot, never on the ESP. fstab uses the
+inner filesystem's UUID, and crypttab uses the LUKS partition UUID.
 
-No hay swap fija en disco: se usa ZRAM (mas abajo). Eso evita escribir
-paginas de memoria sin cifrar y alarga la vida del pendrive.
+There is no fixed swap on disk: ZRAM is used (below). That avoids
+writing unencrypted memory pages and extends the pendrive's life.
 
-Recomendado: ext4.
-Fuente: https://manpages.debian.org/trixie/e2fsprogs/mkfs.ext4.8.en.html
-Fuente: https://manpages.debian.org/trixie/cryptsetup/crypttab.5.en.html
+Recommended: ext4.
+Source: https://manpages.debian.org/trixie/e2fsprogs/mkfs.ext4.8.en.html
+Source: https://manpages.debian.org/trixie/cryptsetup/crypttab.5.en.html
 EOF
 }
 
 # shellcheck disable=SC2016
 help_hardening() {
     cat <<'EOF'
-=== Parametros de endurecimiento del kernel ===
+=== Kernel hardening parameters ===
 
-conservador (RECOMENDADO):
+conservative (RECOMMENDED):
   slab_nomerge, init_on_alloc=1, init_on_free=1,
   page_alloc.shuffle=1, randomize_kstack_offset=1, pti=on, debugfs=off.
-  Mitigaciones conocidas, bajo riesgo de romper programas.
+  Known mitigations, low risk of breaking programs.
 
-agresivo:
-  lo anterior + vsyscall=none + mitigations=auto,nosmt.
-  vsyscall=none puede ROMPER binarios antiguos o glibc viejo.
-  auto,nosmt puede DESACTIVAR SMT/HyperThreading y perder rendimiento.
-  Solo si sabes que ningun programa necesita vsyscalls.
+aggressive:
+  the above + vsyscall=none + mitigations=auto,nosmt.
+  vsyscall=none can BREAK old binaries or an old glibc.
+  auto,nosmt can DISABLE SMT/HyperThreading and lose performance.
+  Only if you know that no program needs vsyscalls.
 
-ninguno:
-  sin parametros extra. Maxima compatibilidad, minima proteccion.
+none:
+  no extra parameters. Maximum compatibility, minimum protection.
 
-Estos valores se escriben en cmdline de limine.conf, no en sysctl, para
-que apliquen desde el primer arranque. No son un "kernel endurecido":
-Debian NO distribuye un kernel "hardened" como paquete; se usa
-linux-image-amd64 oficial mas estas opciones. Es la alternativa mas
-cercana y honesta.
+These values are written into the cmdline of limine.conf, not into
+sysctl, so they apply from the first boot. They are not a "hardened
+kernel": Debian does NOT ship a "hardened" kernel as a package; the
+official linux-image-amd64 plus these options is used. It is the
+closest honest alternative.
 
-Recomendado: conservador. Si algo no arranca, usa la entrada de texto
-del menu de Limine y edita cmdline.
-Fuente: https://www.kernel.org/doc/html/latest/admin-guide/kernel-parameters.html
-Fuente: https://packages.debian.org/trixie/linux-image-amd64
+Recommended: conservative. If something does not boot, use the text
+entry of the Limine menu and edit the cmdline.
+Source: https://www.kernel.org/doc/html/latest/admin-guide/kernel-parameters.html
+Source: https://packages.debian.org/trixie/linux-image-amd64
 EOF
 }
 
 # shellcheck disable=SC2016
 help_plymouth() {
     cat <<'EOF'
-=== Plymouth: animacion de arranque ===
+=== Plymouth: boot animation ===
 
-Plymouth muestra un tema grafico mientras el initramfs pide la frase
-LUKS. Requiere `splash` en cmdline; sin el, muestra texto detallado.
-Temas verificados en trixie: spinfinity, spinner, text, details.
-"ninguno" instala Plymouth pero NO pone splash en la entrada principal.
+Plymouth shows a graphical theme while the initramfs asks for the LUKS
+passphrase. It requires `splash` in the cmdline; without it, detailed
+text is shown. Themes verified on trixie: spinfinity, spinner, text,
+details. "none" installs Plymouth but does NOT put splash in the main
+entry.
 
-spinfinity : animacion clasica de Debian. RECOMENDADO.
-spinner    : mas simple.
-text       : barra de texto, util si KMS falla.
-details    : mensajes detallados con el tema cargado.
+spinfinity : classic Debian animation. RECOMMENDED.
+spinner    : simpler.
+text       : text bar, useful if KMS fails.
+details    : detailed messages with the theme loaded.
 
-Riesgo real: en algunas GPUs o bajo QEMU, Plymouth puede dejar la
-pantalla negra justo cuando hay que escribir la frase LUKS. Por eso el
-script crea SIEMPRE una segunda entrada "texto" sin splash y una tercera
-de rescate. Si la pantalla se queda negra, reinicia y elige "texto".
+Real risk: on some GPUs or under QEMU, Plymouth can leave the screen
+black right when the LUKS passphrase has to be typed. That is why the
+script ALWAYS creates a second "text" entry without splash and a third
+rescue one. If the screen stays black, reboot and choose "text".
 
-La entrada alternativa usa plymouth.enable=0, verificado en el script
-init-premount/plymouth del paquete plymouth_24.004.60-5 de trixie.
+The alternative entry uses plymouth.enable=0, verified in the
+init-premount/plymouth script of the trixie package plymouth_24.004.60-5.
 
-Recomendado: spinfinity + entrada de texto SI.
-Fuente: https://manpages.debian.org/trixie/plymouth/plymouth.8.en.html
-Fuente: https://packages.debian.org/trixie/plymouth
+Recommended: spinfinity + text entry YES.
+Source: https://manpages.debian.org/trixie/plymouth/plymouth.8.en.html
+Source: https://packages.debian.org/trixie/plymouth
 EOF
 }
 
@@ -1094,45 +1099,45 @@ help_limine() {
     cat <<'EOF'
 === Limine: bootloader upstream ===
 
-Decision rapida: el kernel se actualiza SOLO con el hook
-zz-limine-update; --refresh-limine queda solo como rescate.
+Quick decision: the kernel is updated ONLY by the zz-limine-update
+hook; --refresh-limine remains only as a rescue.
 
-Limine NO es paquete Debian; se baja v12.9.6 desde GitHub, se verifica
-SHA-256 y (por defecto) la firma GPG con clave
-05D29860D0A0668AAEFB9D691F3C021BECA23821 en un homedir temporal. Luego se
-compila la herramienta `limine` y se instalan:
+Limine is NOT a Debian package; v12.9.6 is downloaded from GitHub, its
+SHA-256 is verified and (by default) the GPG signature with key
+05D29860D0A0668AAEFB9D691F3C021BECA23821 in a temporary homedir. Then the
+`limine` tool is compiled and they are installed:
   UEFI x64 -> /boot/EFI/BOOT/BOOTX64.EFI
   BIOS     -> /boot/limine-bios.sys + limine bios-install /dev/sda 1
-  IA32     -> BOOTIA32.EFI (opcional, solo equipos UEFI de 32 bits)
+  IA32     -> BOOTIA32.EFI (optional, only 32-bit UEFI machines)
 
-limine.conf usa opciones documentadas: timeout, default_entry,
+limine.conf uses documented options: timeout, default_entry,
 editor_enabled, interface_branding, term_palette/term_background/
-term_foreground, protocol: linux, path: boot():/vmlinuz-ABI, cmdline y
-module_path: boot():/initrd.img-ABI. Las rutas son VERSIONADAS, pero
-ya NO dependes de acordarte de --refresh-limine:
+term_foreground, protocol: linux, path: boot():/vmlinuz-ABI, cmdline and
+module_path: boot():/initrd.img-ABI. The paths are VERSIONED, but you
+no longer depend on remembering --refresh-limine:
 
-Actualizacion AUTOMATICA (v2.1.0): el sistema instalado recibe el hook
-zz-limine-update (0755) en tres sitios:
-  /etc/kernel/postinst.d/       al instalar/actualizar un kernel
-  /etc/kernel/postrm.d/         al borrar un kernel
-  /etc/initramfs/post-update.d/ tras crear/actualizar un initramfs
-Debian ejecuta los hooks de bootloader con prefijo zz- AL FINAL, con
-$1=ABI y $2=ruta de la imagen. El hook recalcula el ultimo par
-vmlinuz-*/initrd.img-* presente (no confia solo en $1, para cubrir
-tambien el borrado), reescribe /boot/limine.conf y su copia UEFI, y
-si /boot no esta montado o no hay par valido avisa y sale con 0 para
-no romper apt. /boot es FAT32 y no admite symlinks utiles para
-Limine, por eso se reescriben las rutas en vez de enlazar archivos
-sin version. --refresh-limine queda SOLO como rescate desde el
-live: sistema que no arranca, hook borrado, o una USB creada con
-una version anterior (una sola ejecucion lo deja automatico).
+AUTOMATIC update (v2.1.0): the installed system receives the
+zz-limine-update hook (0755) in three places:
+  /etc/kernel/postinst.d/       when installing/updating a kernel
+  /etc/kernel/postrm.d/         when removing a kernel
+  /etc/initramfs/post-update.d/ after creating/updating an initramfs
+Debian runs the zz- prefixed bootloader hooks LAST, with $1=ABI and
+$2=image path. The hook recomputes the newest vmlinuz-*/initrd.img-*
+pair present (it does not trust $1 alone, to also cover removal),
+rewrites /boot/limine.conf and its UEFI copy, and if /boot is not
+mounted or there is no valid pair it warns and exits with 0 so as not
+to break apt. /boot is FAT32 and does not support symlinks useful to
+Limine, which is why paths are rewritten instead of linking
+unversioned files. --refresh-limine remains ONLY as a rescue from the
+live session: system that does not boot, deleted hook, or a USB created
+with an older version (a single run makes it automatic).
 
-editor_enabled=yes te permite editar cmdline en el menu (util para
-recuperarte). Si lo desactivas, ganas un poco de "endurecimiento" pero
-pierdes esa salida rapida. Secure Boot debe estar APAGADO: esta
-configuracion no esta inscrita ni firmada para Secure Boot.
+editor_enabled=yes lets you edit the cmdline in the menu (useful for
+recovery). If you disable it, you gain a bit of "hardening" but lose
+that quick way out. Secure Boot must be OFF: this configuration is not
+enrolled or signed for Secure Boot.
 
-Recomendado: verificar GPG SI, editor SI, UEFI x64 SI, BIOS SI, IA32 NO.
+Recommended: verify GPG YES, editor YES, UEFI x64 YES, BIOS YES, IA32 NO.
 Fuente: https://github.com/Limine-Bootloader/Limine/releases/tag/v12.9.6
 Fuente: https://github.com/Limine-Bootloader/Limine/blob/trunk/CONFIG.md
 Fuente: https://github.com/Limine-Bootloader/Limine/blob/trunk/USAGE.md
@@ -1144,36 +1149,36 @@ EOF
 # shellcheck disable=SC2016
 help_greeter() {
     cat <<'EOF'
-=== Gestor de inicio de sesion (greeter) ===
+=== Session login manager (greeter) ===
 
 ly (original):
-  TUI ncurses del proyecto fairyglade, v1.5.0 desde Codeberg. NO esta en
-  Debian. Se compila con Zig 0.17.0 FUERA del target y se instala con
-  `zig build installexe -Ddest_directory=...`. Validado de verdad:
-  compile + ly --validate-config. Coste: descarga ~55 MB de Zig, ~165 KB
-  de Ly, dependencias Git de Zig y ~1 GB libres en /tmp (RAM). Tarda unos
-  minutos. Si la VM tiene 2 GB de RAM o menos, puede fallar con
-  NoSpaceLeft. Requiere red durante la compilacion.
+  ncurses TUI from the fairyglade project, v1.5.0 from Codeberg. NOT in
+  Debian. It is compiled with Zig 0.17.0 OUTSIDE the target and installed
+  with `zig build installexe -Ddest_directory=...`. Really validated:
+  compile + ly --validate-config. Cost: downloads ~55 MB of Zig, ~165 KB
+  of Ly, Zig Git dependencies and ~1 GB free in /tmp (RAM). It takes a
+  few minutes. If the VM has 2 GB of RAM or less, it can fail with
+  NoSpaceLeft. It requires network during compilation.
 
-greetd + tuigreet (ALTERNATIVA EMPAQUETADA, mas robusta):
-  greetd 0.10.3-4 y tuigreet 0.9.1-5 son paquetes de trixie. Cero
-  toolchain, cero descargas extra, cero riesgo de RAM. Hace lo mismo
-  conceptualmente: TUI en una VT que inicia la sesion X11. Config.toml
-  con vt=7 y usuario _greetd (que crea el paquete).
+greetd + tuigreet (PACKAGED ALTERNATIVE, more robust):
+  greetd 0.10.3-4 and tuigreet 0.9.1-5 are trixie packages. Zero
+  toolchain, zero extra downloads, zero RAM risk. It does the same
+  thing conceptually: a TUI on a VT that starts the X11 session.
+  Config.toml with vt=7 and user _greetd (created by the package).
 
-consola:
-  Sin gestor grafico: login en TTY y `startx` manual si hay GUI.
-  Minimo absoluto. Si elegiste GUI=no en la pregunta anterior, el
-  script ya puso GREETER=consola automaticamente y ni siquiera
-  veras este menu: sin X11 no hay greeter grafico posible.
+console:
+  No graphical manager: login on a TTY and manual `startx` if there is
+  a GUI. Absolute minimum. If you chose GUI=no in the previous question,
+  the script already set GREETER=console automatically and you will not
+  even see this menu: without X11 there is no possible graphical greeter.
 
-Discrepancia documental detectada: el README del tag v1.5.0 dice Zig
-0.16.x, pero build.zig.zon exige 0.17.0. La combinacion que REALMENTE
-compila es v1.5.0 + Zig 0.17.0, y es la que usa este script.
+Documentation discrepancy detected: the v1.5.0 tag README says Zig
+0.16.x, but build.zig.zon requires 0.17.0. The combination that
+ACTUALLY compiles is v1.5.0 + Zig 0.17.0, and it is what this script uses.
 
-Recomendado: greetd para el PRIMER arranque (arranca si o si). Elige ly
-si quieres el original y aceptas el build upstream. Si tu VM tiene poca
-RAM, el script te avisara y te preguntara antes de seguir.
+Recommended: greetd for the FIRST boot (it boots no matter what). Choose
+ly if you want the original and accept the upstream build. If your VM
+has little RAM, the script will warn you and ask before continuing.
 Fuente: https://codeberg.org/fairyglade/ly/raw/tag/v1.5.0/readme.md
 Fuente: https://codeberg.org/fairyglade/ly/raw/tag/v1.5.0/build.zig.zon
 Fuente: https://ziglang.org/download/index.json
@@ -1185,45 +1190,45 @@ EOF
 # shellcheck disable=SC2016
 help_gui() {
     cat <<'EOF'
-=== Entorno grafico X11 ligero ===
+=== Lightweight X11 graphical environment ===
 
-Decision rapida: GUI=si = Xorg + Openbox ligero. GUI=no = solo TTY,
-CERO paquetes X11 y sin /etc/X11 (corregido en v2.1.0).
+Quick decision: GUI=yes = Xorg + lightweight Openbox. GUI=no = TTY
+only, ZERO X11 packages and no /etc/X11 (fixed in v2.1.0).
 
-Si GUI=si se instala Xorg minimo (xserver-xorg-core, drivers de entrada
-y video, libgl1-mesa-dri, xauth, xinit) mas, segun elijas:
-  WM         openbox (tema Nightmare incluido en el paquete) o ninguno.
-  Compositor picom (transparencias/sombras) o ninguno.
-  Barra      tint2 o ninguno.
-  Lanzador   rofi (drun con Win+r) o ninguno.
-  Terminal   xterm, alacritty o ambas.
-  Fuente     JetBrains Mono, DejaVu Sans Mono o Terminus.
-  Colores    fondo/texto/acento en RRGGBB para .Xresources, Openbox y
-             la propia interfaz de Limine.
+If GUI=yes, minimal Xorg is installed (xserver-xorg-core, input and
+video drivers, libgl1-mesa-dri, xauth, xinit) plus, as you choose:
+  WM         openbox (Nightmare theme included in the package) or none.
+  Compositor picom (transparency/shadows) or none.
+  Bar        tint2 or none.
+  Launcher   rofi (drun with Win+r) or none.
+  Terminal   xterm, alacritty or both.
+  Font       JetBrains Mono, DejaVu Sans Mono or Terminus.
+  Colours    background/text/accent in RRGGBB for .Xresources, Openbox
+             and Limine's own interface.
 
-Es estetica "hacker" VISUAL y funcional: colores, monoespaciada, atajos.
-NO se instalan herramientas de intrusion, escaneo ni exploiting. No hay
-escritorio pesado (GNOME/KDE/XFCE), ni servicios de telemetria.
+It is a VISUAL and functional "hacker" aesthetic: colours, monospace,
+shortcuts. NO intrusion, scanning or exploiting tools are installed.
+There is no heavy desktop (GNOME/KDE/XFCE), nor telemetry services.
 
-Si GUI=no (corregido en v2.1.0, antes instalaba X11 igual):
-  - La lista de paquetes NO contiene xserver-xorg-*, x11-xkb-utils,
+If GUI=no (fixed in v2.1.0, before it installed X11 anyway):
+  - The package list does NOT contain xserver-xorg-*, x11-xkb-utils,
     x11-xserver-utils, xauth, xinit, libgl1-mesa-dri, Openbox, picom,
-    tint2, rofi, feh, xterm ni alacritty, ni siquiera como resto:
-    x11-xkb-utils arrastra libx11-6 y otras bibliotecas X11, por lo
-    que vivia SOLO dentro de la rama GUI=si.
-  - No se crea /etc/X11, ni .Xresources, ni config de Openbox; la
-    etapa 13 se omite entera y GREETER queda en consola.
-  - El teclado de CONSOLA lo sigue gestionando console-setup /
-    keyboard-configuration, que no es X11.
-  - Siguen Plymouth (framebuffer del arranque, no X11), ZRAM, red y
-    audio solo si los eliges aparte. Es la opcion "solo TTY", limpia
-    de verdad, estilo Arch sin entorno grafico.
+    tint2, rofi, feh, xterm or alacritty, not even as a leftover:
+    x11-xkb-utils drags in libx11-6 and other X11 libraries, so it
+    lived ONLY inside the GUI=yes branch.
+  - No /etc/X11, no .Xresources, no Openbox config is created; stage
+    13 is skipped entirely and GREETER stays at console.
+  - The CONSOLE keyboard is still managed by console-setup /
+    keyboard-configuration, which is not X11.
+  - Plymouth (boot framebuffer, not X11), ZRAM, network and audio
+    remain, only if you choose them separately. It is the "TTY only"
+    option, truly clean, Arch-style without a graphical environment.
 
-Coste aproximado de GUI=si: 150-250 MB y ~40 paquetes mas. En una USB
-de 59 GB es irrelevante; en RAM de la VM si importa al instalar.
+Approximate cost of GUI=yes: 150-250 MB and ~40 more packages. On a
+59 GB USB it is irrelevant; in the VM's RAM it does matter at install time.
 
-Recomendado: GUI=si con Openbox + picom + tint2 + rofi + xterm.
-Para un sistema solo de consola, o depurar un arranque, GUI=no.
+Recommended: GUI=yes with Openbox + picom + tint2 + rofi + xterm.
+For a console-only system, or to debug a boot, GUI=no.
 Fuente: https://packages.debian.org/trixie/openbox
 Fuente: https://packages.debian.org/trixie/tuigreet
 Fuente: https://packages.debian.org/trixie/x11-xkb-utils
@@ -1234,26 +1239,26 @@ EOF
 # shellcheck disable=SC2016
 help_zram() {
     cat <<'EOF'
-=== ZRAM en vez de swap fija ===
+=== ZRAM instead of fixed swap ===
 
-systemd-zram-generator crea /dev/zram0 como swap COMPRIMIDA en RAM.
-Configuracion: zram-size = min(ram / 2, LIMITE) y swap-priority = 100,
-para que el kernel la prefiera antes que cualquier otro swap.
+systemd-zram-generator creates /dev/zram0 as COMPRESSED swap in RAM.
+Configuration: zram-size = min(ram / 2, LIMIT) and swap-priority = 100,
+so the kernel prefers it over any other swap.
 
-Ventajas en una USB cifrada:
-  - No se escribe swap sin cifrar en el pendrive.
-  - Menos desgaste del flash.
-  - No hace falta particion de swap ni resume/hibernacion (RESUME=none).
+Advantages on an encrypted USB:
+  - No unencrypted swap is written to the pendrive.
+  - Less flash wear.
+  - No swap partition or resume/hibernation needed (RESUME=none).
 
-Limites: 1024/2048/4096 MiB son TOPES de dispositivo zram, no RAM
-reservada de golpe. El limite no debe superar la RAM de la PC mas pequena
-donde vayas a usar la USB. Si eliges 4096 y arrancas en un equipo con
-2 GB, el generador ajusta con ram/2, pero mejor no tentar.
+Limits: 1024/2048/4096 MiB are zram DEVICE caps, not RAM reserved upfront.
+The limit should not exceed the RAM of the smallest PC where you will
+use the USB. If you choose 4096 and boot on a 2 GB machine, the
+generator adjusts with ram/2, but better not to tempt it.
 
-Si ZRAM=no, el sistema queda SIN swap. Es valido si tienes mucha RAM,
-pero bajo presion de memoria el OOM killer actuara antes.
+If ZRAM=no, the system is left WITHOUT swap. Valid if you have plenty
+of RAM, but under memory pressure the OOM killer will act sooner.
 
-Recomendado: ZRAM=si con 2048 MiB.
+Recommended: ZRAM=yes with 2048 MiB.
 Fuente: https://manpages.debian.org/trixie/systemd-zram-generator/zram-generator.conf.5.en.html
 EOF
 }
@@ -1264,17 +1269,17 @@ help_pipewire() {
 === Audio: PipeWire ===
 
 minimal: pipewire, pipewire-pulse, pipewire-alsa, wireplumber.
-         Cubre salida/entrada y compatibilidad con apps que hablan
-         PulseAudio o ALSA. RECOMENDADO.
-bluetooth: lo anterior + libspa-0.2-bluetooth, bluez y pulseaudio-utils.
-         Anade soporte Bluetooth y ~30 MB. Solo si usaras auriculares BT.
-ninguno: sin servidor de audio. Ahorra ~15 MB y un servicio. Los
-         programas que esperen PulseAudio simplemente no tendran sonido.
+         Covers output/input and compatibility with apps that speak
+         PulseAudio or ALSA. RECOMMENDED.
+bluetooth: the above + libspa-0.2-bluetooth, bluez and pulseaudio-utils.
+         Adds Bluetooth support and ~30 MB. Only if you will use BT headsets.
+none: no audio server. Saves ~15 MB and one service. Programs expecting
+         PulseAudio will simply have no sound.
 
-WirePlumber es el administrador de sesiones; sin el, PipeWire arranca
-pero no gestiona dispositivos correctamente.
+WirePlumber is the session manager; without it, PipeWire starts but
+does not manage devices correctly.
 
-Recomendado: minimal. Anade bluetooth despues con apt si lo necesitas.
+Recommended: minimal. Add bluetooth later with apt if you need it.
 Fuente: https://wiki.debian.org/PipeWire
 Fuente: https://packages.debian.org/trixie/pipewire
 EOF
@@ -1283,23 +1288,23 @@ EOF
 # shellcheck disable=SC2016
 help_network() {
     cat <<'EOF'
-=== Red ===
+=== Network ===
 
-NetworkManager: gestiona Ethernet y Wi-Fi, trae nmtui para configurar
-    desde TTY, y es lo mas comodo en una USB que cambia de PC. Anade
-    network-manager, wpasupplicant e iw. RECOMENDADO para portable.
-dhcpcd-base:   solo DHCP por cable/inalambrico basico, sin applet ni
-    nmtui. Menos servicios y menos paquetes. Ya viene en el live, pero
-    se instala explicitamente en el target.
-ninguno:       sin gestor; tendras que configurar /etc/network/interfaces
-    o ip a mano. Maximo minimalismo, mayor riesgo de quedarte sin red
-    despues del primer arranque.
+NetworkManager: manages Ethernet and Wi-Fi, ships nmtui to configure
+    from a TTY, and is the most comfortable on a USB that changes PCs.
+    Adds network-manager, wpasupplicant and iw. RECOMMENDED for portable.
+dhcpcd-base:   basic wired/wireless DHCP only, no applet or nmtui.
+    Fewer services and packages. It already comes in the live session,
+    but it is installed explicitly into the target.
+none:          no manager; you will have to configure
+    /etc/network/interfaces or ip by hand. Maximum minimalism, higher
+    risk of being left without network after the first boot.
 
-Importante: durante la INSTALACION la red la usa el live, no el target.
-Este choice afecta al sistema ya instalado. El preflight comprueba la red
-del live antes de empezar.
+Important: during the INSTALLATION the network is used by the live
+session, not the target. This choice affects the installed system. The
+preflight checks the live network before starting.
 
-Recomendado: NetworkManager. Si quieres pocos servicios, dhcpcd-base.
+Recommended: NetworkManager. If you want few services, dhcpcd-base.
 Fuente: https://packages.debian.org/trixie/network-manager
 Fuente: https://packages.debian.org/trixie/dhcpcd-base
 EOF
@@ -1308,35 +1313,37 @@ EOF
 # shellcheck disable=SC2016
 help_security() {
     cat <<'EOF'
-=== Firewall, AppArmor y servicios opcionales ===
+=== Firewall, AppArmor and optional services ===
 
-nftables (SI por defecto): reglas inet filter con policy drop en input
-    y forward, lo aceptado, established/related, ICMP/ICMPv6 y DHCP/DHCPv6.
-    La sintaxis se valida con `nft -c -f` DENTRO del chroot antes de
-    habilitar el servicio. Ojo: NO abre ningun puerto entrante; si luego
-    instalas SSH y quieres acceder desde otra PC, tendras que anadir una
-    regla. Es intencional: primero arranca, despues expones.
+nftables (YES by default): inet filter rules with drop policy on input
+    and forward, loopback accepted, established/related, ICMP/ICMPv6 and
+    DHCP/DHCPv6. The syntax is validated with `nft -c -f` INSIDE the
+    chroot before enabling the service. Note: it does NOT open any
+    incoming port; if you later install SSH and want to reach it from
+    another PC, you will have to add a rule. That is intentional: first
+    boot, then expose.
 
-    Dos detalles que evitan el error "Could not resolve protocol name":
-    - Se instala `netbase` (12 kB), que aporta /etc/protocols. nft resuelve
-      nombres como `ipv6-icmp` leyendo ESE archivo DENTRO del chroot; sin el,
-      debootstrap --variant=minbase no lo trae y `nft -c -f` aborta.
-    - Se usa `meta l4proto icmp` / `meta l4proto ipv6-icmp` en vez de
-      `ip6 nexthdr`: en la familia inet, meta l4proto salta los extension
-      headers de IPv6 y no depende de que el Next Header sea el ICMPv6.
-      La wiki de nftables lo recomienda explicitamente.
-AppArmor (SI): perfiles Mandatory Access Control. En Debian viene activo
-    desde Buster; se habilita el servicio. Coste minimo.
-opendoas (NO): alternativa minima a sudo (el paquete "doas" es solo
-    transicional; el real es opendoas). Se instala ademas de sudo, con
-    `permit persist :sudo`. No sustituye nada; es comodidad.
-auditd (NO): daemon de auditoria. Util en servidores, genera muchos logs
-    y escribe constantemente: mala idea en un pendrive.
-openssh-server (NO): servidor SSH. Si lo activas, recuerda que nftables
-    NO abre el puerto 22 por defecto. Activalo solo si sabes que quieres
-    administrar la USB remotamente.
+    Two details that avoid the "Could not resolve protocol name" error:
+    - `netbase` (12 kB) is installed, which provides /etc/protocols. nft
+      resolves names like `ipv6-icmp` by reading THAT file INSIDE the
+      chroot; without it, debootstrap --variant=minbase does not bring
+      it and `nft -c -f` aborts.
+    - `meta l4proto icmp` / `meta l4proto ipv6-icmp` is used instead of
+      `ip6 nexthdr`: in the inet family, meta l4proto skips the IPv6
+      extension headers and does not depend on the Next Header being
+      ICMPv6. The nftables wiki explicitly recommends it.
+AppArmor (YES): Mandatory Access Control profiles. In Debian it has
+    been active since Buster; the service is enabled. Minimal cost.
+opendoas (NO): minimal alternative to sudo (the "doas" package is only
+    transitional; the real one is opendoas). Installed in addition to
+    sudo, with `permit persist :sudo`. It replaces nothing; convenience.
+auditd (NO): audit daemon. Useful on servers, generates lots of logs
+    and writes constantly: a bad idea on a pendrive.
+openssh-server (NO): SSH server. If you enable it, remember nftables
+    does NOT open port 22 by default. Enable it only if you know you
+    want to administer the USB remotely.
 
-Recomendado: nftables SI, AppArmor SI, doas/auditd/ssh NO.
+Recommended: nftables YES, AppArmor YES, doas/auditd/ssh NO.
 Fuente: https://wiki.nftables.org/wiki-nftables/index.php/Matching_packet_headers
 Fuente: https://packages.debian.org/trixie/netbase
 Fuente: https://packages.debian.org/trixie/all/netbase/filelist
@@ -1349,24 +1356,24 @@ EOF
 # shellcheck disable=SC2016
 help_bootmodes() {
     cat <<'EOF'
-=== Modos de arranque y Secure Boot ===
+=== Boot modes and Secure Boot ===
 
-UEFI x64 (SI): instala BOOTX64.EFI en /boot/EFI/BOOT/. Es el modo de
-    casi todas las PCs modernas y de OVMF en QEMU.
-BIOS/legacy (SI): crea particion BIOS Boot ef02 y ejecuta
-    `limine bios-install /dev/sda 1`. Permite arrancar en equipos viejos
-    o en QEMU con -machine pc. Cuesta 2 MiB.
-UEFI IA32 (NO): BOOTIA32.EFI para las pocas tablets/Atom con UEFI de 32
-    bits y CPU de 64. Activalo solo si sabes que tu equipo lo necesita.
-Secure Boot (debe estar NO): esta instalacion NO esta firmada para
-    Secure Boot. Si el firmware lo tiene activo, Limine no arrancara.
-    El script se NIEGA a continuar si respondes que esta activo: apagalo
-    en la configuracion de la VM/BIOS antes de seguir.
+UEFI x64 (YES): installs BOOTX64.EFI in /boot/EFI/BOOT/. It is the mode
+    of almost all modern PCs and of OVMF in QEMU.
+BIOS/legacy (YES): creates the BIOS Boot partition ef02 and runs
+    `limine bios-install /dev/sda 1`. Allows booting on old machines or
+    in QEMU with -machine pc. Costs 2 MiB.
+UEFI IA32 (NO): BOOTIA32.EFI for the few tablets/Atom with 32-bit UEFI
+    and 64-bit CPU. Enable it only if you know your machine needs it.
+Secure Boot (must be NO): this installation is NOT signed for Secure
+    Boot. If the firmware has it enabled, Limine will not start. The
+    script REFUSES to continue if you answer that it is enabled: turn
+    it off in the VM/BIOS setup before continuing.
 
-Tener UEFI + BIOS a la vez NO es incompatible: son dos rutas distintas
-sobre el mismo GPT. Es justo lo que hace portable la USB.
+Having UEFI + BIOS at once is NOT incompatible: they are two different
+paths over the same GPT. It is exactly what makes the USB portable.
 
-Recomendado: UEFI SI, BIOS SI, IA32 NO, Secure Boot NO.
+Recommended: UEFI YES, BIOS YES, IA32 NO, Secure Boot NO.
 Fuente: https://github.com/Limine-Bootloader/Limine/blob/trunk/USAGE.md
 Fuente: https://github.com/Limine-Bootloader/Limine/blob/trunk/FAQ.md
 EOF
@@ -1375,9 +1382,9 @@ EOF
 # shellcheck disable=SC2016
 help_bios_install() {
     cat <<'EOF'
-=== Limine BIOS: particion ef02 y firmas residuales ===
+=== Limine BIOS: ef02 partition and residual signatures ===
 
-Sintoma que puede aparecer en la etapa 9:
+Symptom that may appear in stage 9:
 
   Installing to GPT. Logical block size of 512 bytes.
   error: The partition selected to install the BIOS boot code to contains
@@ -1385,64 +1392,65 @@ Sintoma que puede aparecer en la etapa 9:
          Pass `--force` to override these checks.
   Install failed, undoing work...
 
-Por que pasa:
-  `sgdisk --zap-all` borra la TABLA de particiones (MBR/GPT), pero NO borra
-  los DATOS que habia dentro de las particiones anteriores. Al reutilizar
-  la USB, la nueva particion 1 (tipo ef02, BIOS Boot, empieza en LBA 2048
-  = 1 MiB) cae justo encima del viejo boot sector: ahi siguen las cadenas
-  "FAT32" / "FAT" o el magic 0xEF53 de ext2/3/4.
+Why it happens:
+  `sgdisk --zap-all` erases the partition TABLE (MBR/GPT), but does NOT
+  erase the DATA that was inside the previous partitions. When reusing
+  the USB, the new partition 1 (type ef02, BIOS Boot, starts at LBA 2048
+  = 1 MiB) lands right on top of the old boot sector: the strings
+  "FAT32" / "FAT" or the ext2/3/4 magic 0xEF53 are still there.
 
-  El codigo de Limine 12.9.6 (validate_or_force en limine.c) lee estos
-  offsets al INICIO de la particion elegida:
-    +3     -> "NTFS"  o "FAT32" (5 bytes)
+  Limine 12.9.6's code (validate_or_force in limine.c) reads these
+  offsets at the START of the chosen partition:
+    +3     -> "NTFS"  or "FAT32" (5 bytes)
     +54    -> "FAT"   (3 bytes)
     +82    -> "FAT"   (3 bytes)
-    +1080  -> 0xEF53  (magic de superbloque ext2/3/4)
-  Si encuentra alguno, se NIEGA a escribir el stage 2 y sugiere --force.
-  Es una proteccion correcta: evita destruir un filesystem real por error.
+    +1080  -> 0xEF53  (ext2/3/4 superblock magic)
+  If it finds any, it REFUSES to write stage 2 and suggests --force.
+  It is a correct protection: it avoids destroying a real filesystem by
+  mistake.
 
-Solucion que aplica este script (SIN --force):
-  1. Ceros en los primeros 4096 bytes de la UNICA particion que Limine
-     BIOS inspecciona: /dev/sda1 (ef02). 4096 cubre con holgura los
-     cuatro offsets (+3, +54, +82, +1080).
-  2. Verificacion con `cmp` contra /dev/zero: si no quedaron a cero, el
-     script ABORTA en vez de seguir con un disco a medio limpiar.
+Solution applied by this script (WITHOUT --force):
+  1. Zeros in the first 4096 bytes of the ONLY partition Limine BIOS
+     inspects: /dev/sda1 (ef02). 4096 comfortably covers the four
+     offsets (+3, +54, +82, +1080).
+  2. Verification with `cmp` against /dev/zero: if they are not zero,
+     the script ABORTS instead of continuing with a half-cleaned disk.
 
-  NO se ejecuta `wipefs` sobre /dev/sda2 ni /dev/sda3. La etapa 3 crea
-  un FAT32 nuevo con `mkfs.fat` y un LUKS2 nuevo con `luksFormat`, que
-  reescriben esas cabeceras. Ademas, `wipefs -a` hace escrituras de 5
-  bytes en offsets como +82; con QEMU `cache=none` sobre un disco fisico
-  del anfitrion eso puede terminar en "critical target error" /
-  "lost async page write". Una sola escritura alineada de 4096 bytes
-  evita ese patron sin perder la proteccion de Limine.
+  `wipefs` is NOT run on /dev/sda2 or /dev/sda3. Stage 3 creates a new
+  FAT32 with `mkfs.fat` and a new LUKS2 with `luksFormat`, which rewrite
+  those headers. Also, `wipefs -a` makes 5-byte writes at offsets like
+  +82; with QEMU `cache=none` over a host physical disk that can end in
+  "critical target error" / "lost async page write". A single aligned
+  4096-byte write avoids that pattern without losing Limine's protection.
 
-  Esto se hace en la etapa 2 y OTRA VEZ en la etapa 9 justo antes de
-  bios-install, para que tambien funcione con --resume.
+  This is done in stage 2 and AGAIN in stage 9 right before
+  bios-install, so it also works with --resume.
 
-Si en el live aparece "critical target error" o "lost async page write",
-NO es un fallo de Limine: es el anfitrion que rechazo la escritura.
-Antes de continuar revisa en el live:
+If "critical target error" or "lost async page write" appears in the
+live session, it is NOT a Limine failure: it is the host rejecting the
+write. Before continuing, check in the live session:
 
   lsblk -o NAME,RO,TRAN,HOTPLUG /dev/sda
   blockdev --getro /dev/sda /dev/sda2
   dmesg | tail -50
 
-Que hace --force:
-  Segun `limine bios-install --help`, "Force installation even if the safety
-  checks fail (DANGEROUS!)". En el codigo, ademas de saltarse el aviso,
-  SOBREESCRIBE las firmas con ceros y puede saltar otras comprobaciones
-  de tabla de particiones. Equivale a nuestra limpieza pero sin verificar
-  y sin el resto de guardas. Por eso NO se usa por defecto.
+What --force does:
+  According to `limine bios-install --help`, "Force installation even if
+  the safety checks fail (DANGEROUS!)". In the code, besides skipping
+  the warning, it OVERWRITES the signatures with zeros and can skip
+  other partition table checks. Equivalent to our cleanup but without
+  verifying and without the other guards. That is why it is NOT used
+  by default.
 
-Opcion LIMINE_BIOS_FORCE:
-  no (RECOMENDADO): limpiar y verificar; bios-install sin --force.
-  si              : limpiar, verificar y ANNADIR --force. Solo si aun asi
-                    falla (firmware raro, tabla GPT exotica) y sabes que
-                    /dev/sda es tu USB. Queda registrado en el log.
+LIMINE_BIOS_FORCE option:
+  no (RECOMMENDED): clean and verify; bios-install without --force.
+  yes             : clean, verify and ADD --force. Only if it still
+                    fails (weird firmware, exotic GPT table) and you
+                    know /dev/sda is your USB. It is logged.
 
-La particion ef02 NO se formatea: esta destinada en exclusiva al stage 2
-de Limine. Escribir ceros ahi es seguro y no borra datos del sistema, que
-viven en /boot (FAT32, particion 2) y en LUKS (particion 3).
+The ef02 partition is NOT formatted: it is dedicated exclusively to
+Limine's stage 2. Writing zeros there is safe and does not erase system
+data, which lives in /boot (FAT32, partition 2) and in LUKS (partition 3).
 
 Fuente: https://github.com/Limine-Bootloader/Limine/blob/v12.9.6/host/limine.c
 Fuente: https://github.com/Limine-Bootloader/Limine/blob/trunk/USAGE.md
@@ -1451,79 +1459,81 @@ Fuente: https://www.qemu.org/docs/master/system/invocation.html
 Fuente: https://manpages.debian.org/trixie/dosfstools/mkfs.fat.8.en.html
 Fuente: https://manpages.debian.org/trixie/cryptsetup-bin/cryptsetup-luksFormat.8.en.html
 
-Recomendado: LIMINE_BIOS_FORCE=no.
+Recommended: LIMINE_BIOS_FORCE=no.
 EOF
 }
 
 # shellcheck disable=SC2016
 help_dns() {
     cat <<'EOF'
-=== DNS del sistema instalado ===
+=== DNS of the installed system ===
 
-Se escribe /etc/resolv.conf con dos nameserver. Durante la instalacion
-se usa el resolv.conf del live; al final se reemplaza por estos valores
-en el target.
+An /etc/resolv.conf with two nameservers is written. During the
+installation the live session's resolv.conf is used; at the end it is
+replaced by these values in the target.
 
-1.1.1.1 / 8.8.8.8 son publicos y funcionan en casi cualquier red.
-Si tu red usa un resolutor local (router, Pi-hole, VPN), pon aqui su IP.
-Si elegiste NetworkManager, el tambien puede reescribir resolv.conf al
-conectarse; no es un error.
+1.1.1.1 / 8.8.8.8 are public and work on almost any network.
+If your network uses a local resolver (router, Pi-hole, VPN), enter
+its IP here. If you chose NetworkManager, it may also rewrite
+resolv.conf when connecting; that is not an error.
 
-Ahora se valida que sea IPv4 o IPv6 literal. Usa solo IP literales, no nombres de host: en el primer arranque aun no
-hay garantia de resolver nombres antes de que la red este arriba.
+It is now validated to be a literal IPv4 or IPv6. Use only literal IPs,
+not hostnames: on the first boot there is no guarantee of resolving
+names before the network is up.
 
-Recomendado: deja los valores por defecto salvo que tengas un DNS propio.
+Recommended: leave the defaults unless you have your own DNS.
 EOF
 }
 
 # shellcheck disable=SC2016
 help_extras() {
     cat <<'EOF'
-=== Paquetes adicionales y limpieza ===
+=== Extra packages and cleanup ===
 
-Paquetes adicionales: nombres APT separados por espacios, p. ej.
+Extra packages: APT names separated by spaces, e.g.
   vim neofetch tmux git
-Se validan con una expresion regular: letras minusculas, numeros y los
-signos mas, punto y guion. Se anaden a la SIMULACION y a la instalacion.
-Si escribes un
-nombre inexistente, `apt-get -s install` fallara ANTES de instalar nada,
-asi que no romperas el disco. Deja vacio para no anadir nada.
+They are validated with a regular expression: lowercase letters,
+numbers and the plus, dot and hyphen signs. They are added to the
+SIMULATION and to the installation. If you type a nonexistent name,
+`apt-get -s install` will fail BEFORE installing anything, so you will
+not break the disk. Leave empty to add nothing.
 
-Limpieza de rastros (SI): al final se borran del target
+Trace cleanup (YES): at the end, the following are deleted from the target
   /debootstrap, bootstrap.log, debootstrap.log, /root/.bash_history,
-  *.deb en apt/archives, listas APT y contenido de /tmp.
-Quedan SOLO configuraciones normales de Debian. El script, el log, el
-estado, los tarballs, Zig, las cachés y las claves GPG nunca se copian
-al target: estan en /tmp (RAM) y scratch/ se borra al salir.
+  *.deb in apt/archives, APT lists and the contents of /tmp.
+ONLY normal Debian configurations remain. The script, the log, the
+state, tarballs, Zig, caches and GPG keys are never copied to the
+target: they are in /tmp (RAM) and scratch/ is deleted on exit.
 
-Si pones limpieza=NO, conservaras el directorio /debootstrap dentro del
-sistema instalado. Solo tiene sentido para depurar el bootstrap.
+If you set cleanup=NO, you will keep the /debootstrap directory inside
+the installed system. That only makes sense to debug the bootstrap.
 
-Recomendado: limpieza SI, paquetes extra vacio en el primer intento.
+Recommended: cleanup YES, extra packages empty on the first attempt.
 EOF
 }
 
 # shellcheck disable=SC2016
 help_cleanup() {
     cat <<'EOF'
-=== Confirmacion final antes de destruir /dev/sda ===
+=== Final confirmation before destroying /dev/sda ===
 
-El siguiente paso ejecuta `sgdisk --zap-all /dev/sda`, crea particiones,
-mkfs.fat, cryptsetup luksFormat y mkfs dentro de LUKS. Es IRREVERSIBLE.
+The next step runs `sgdisk --zap-all /dev/sda`, creates partitions,
+mkfs.fat, cryptsetup luksFormat and mkfs inside LUKS. It is IRREVERSIBLE.
 
-Antes de escribir la confirmacion el script ya habra:
-  - verificado root, trixie, red, mirrors y herramientas;
-  - mostrado modelo, serie, tamano, TRAN y HOTPLUG de /dev/sda;
-  - comprobado que no haya particiones montadas;
-  - guardado (si elegiste conservar) los primeros 16 MiB, el volcado de
-    particiones y la tabla GPT anterior en RAM.
+Before you type the confirmation the script will already have:
+  - verified root, trixie, network, mirrors and tools;
+  - shown model, serial, size, TRAN and HOTPLUG of /dev/sda;
+  - checked that no partitions are mounted;
+  - saved (if you chose keep) the first 16 MiB, the partition dump and
+    the previous GPT table in RAM.
 
-Debes escribir EXACTAMENTE:  BORRAR /dev/sda
+You must type EXACTLY:  ERASE /dev/sda
 
-Si dudas, cancela con Ctrl+C. No hay marcha atras y, como todo esta en
-RAM, al apagar la VM tampoco quedara copia de los respaldos.
+If in doubt, cancel with Ctrl+C. There is no turning back and, since
+everything is in RAM, powering off the VM will also leave no copy of
+the backups.
 
-Recomendado: relee `lsblk` que imprime el preflight antes de confirmar.
+Recommended: re-read the `lsblk` printed by the preflight before confirming.
 EOF
 }
 
@@ -1532,19 +1542,19 @@ help_confirm() {
     help_cleanup
 }
 
-# ---------------------------- preguntas ----------------------------
+# ---------------------------- questions ----------------------------
 
 ask() {
     local var="$1" prompt="$2" default="$3" ans="" allow_empty=0
     [[ -n "$default" ]] || allow_empty=1
     if (( ACCEPT_DEFAULTS )); then
         printf -v "$var" '%s' "$default"
-        log "$prompt = $default (por defecto)"
+        log "$prompt = $default (default)"
         return 0
     fi
     while true; do
         show_help
-        IFS= read -r -p "$(ui_prompt "$prompt [$default] (? ayuda completa): ")" ans || die "Entrada cancelada"
+        IFS= read -r -p "$(ui_prompt "$prompt [$default] (? full help): ")" ans || die "Input cancelled"
         if [[ "$ans" == "?" ]]; then
             HELP_FULL=1
             HELP_SHOWN=""
@@ -1552,7 +1562,7 @@ ask() {
         fi
         ans="${ans:-$default}"
         if (( ! allow_empty )) && [[ -z "$ans" ]]; then
-            printf 'No vacío.\n'
+            printf 'Not empty.\n'
             continue
         fi
         printf -v "$var" '%s' "$ans"
@@ -1566,12 +1576,12 @@ ask_yes() {
     local var="$1" prompt="$2" default="$3" ans=""
     if (( ACCEPT_DEFAULTS )); then
         printf -v "$var" '%s' "$default"
-        log "$prompt = $default (por defecto)"
+        log "$prompt = $default (default)"
         return 0
     fi
     while true; do
         show_help
-        IFS= read -r -p "$(ui_prompt "$prompt [s/n, por defecto $default, ? ayuda]: ")" ans || die "Entrada cancelada"
+        IFS= read -r -p "$(ui_prompt "$prompt [y/n, default $default, ? help]: ")" ans || die "Input cancelled"
         if [[ "$ans" == "?" ]]; then
             HELP_FULL=1
             HELP_SHOWN=""
@@ -1579,9 +1589,9 @@ ask_yes() {
         fi
         ans="${ans:-$default}"
         case "$ans" in
-            s|S|si|SI|y|Y|yes) printf -v "$var" '%s' "si" ;;
+            y|Y|yes|YES) printf -v "$var" '%s' "yes" ;;
             n|N|no|NO) printf -v "$var" '%s' "no" ;;
-            *) printf 'Responde s o n.\n'; continue ;;
+            *) printf 'Answer y or n.\n'; continue ;;
         esac
         HELP_FN=""
         HELP_SHOWN=""
@@ -1603,12 +1613,12 @@ menu() {
         printf '  %s%s%s\n' "$C_CYAN" "$prompt" "$C_RESET"
         for i in "${!opts[@]}"; do
             if (( i + 1 == default_num )); then
-                printf '  %s%d) %s%s  (por defecto)\n' "$C_GREEN" "$((i+1))" "${opts[i]}" "$C_RESET"
+                printf '  %s%d) %s%s  (default)\n' "$C_GREEN" "$((i+1))" "${opts[i]}" "$C_RESET"
             else
                 printf '  %d) %s\n' "$((i+1))" "${opts[i]}"
             fi
         done
-        IFS= read -r -p "$(ui_prompt "Elige 1-${#opts[@]} [${default_num}], ? ayuda completa: ")" ans || die "Entrada cancelada"
+        IFS= read -r -p "$(ui_prompt "Choose 1-${#opts[@]} [${default_num}], ? full help: ")" ans || die "Input cancelled"
         if [[ "$ans" == "?" ]]; then
             HELP_FULL=1
             HELP_SHOWN=""
@@ -1621,57 +1631,57 @@ menu() {
             HELP_SHOWN=""
             return 0
         fi
-        printf 'Opción inválida.\n'
+        printf 'Invalid option.\n'
     done
 }
 
 check_secret() {
     local s="$1" min="${PASS_MIN_LEN:-1}" len
-    [[ -n "$s" ]] || die "La contraseña no puede estar vacía"
-    # Rango ASCII imprimible 0x21..0x7E. Se usa "tr -d" en vez de
-    # "grep -q" porque tr CONSUME toda la entrada: no cierra la tubería
-    # antes de tiempo y no provoca curl(23)/SIGPIPE con pipefail.
-    # Se CUENTAN BYTES con wc -c en vez de capturar la cadena: $(...) quita
-    # los saltos de línea finales y dejaría colar una contraseña con \n.
-    # Si queda algún byte tras borrar !-~, es espacio, tabulador, salto de
-    # línea, control, acento o UTF-8 no ASCII.
-    # ':' se permite porque chpasswd -c YESCRYPT toma como contraseña todo
-    # lo que sigue al primer ':' (verificado con el hash resultante).
+    [[ -n "$s" ]] || die "The password must not be empty"
+    # Printable ASCII range 0x21..0x7E. "tr -d" is used instead of
+    # "grep -q" because tr CONSUMES the whole input: it does not close the
+    # pipe early and does not cause curl(23)/SIGPIPE with pipefail.
+    # BYTES are COUNTED with wc -c instead of capturing the string: $(...)
+    # strips trailing newlines and would let a password with a \n slip in.
+    # If any byte remains after deleting !-~, it is a space, tab, newline,
+    # control, accent or non-ASCII UTF-8.
+    # ':' is allowed because chpasswd -c YESCRYPT takes as the password
+    # everything after the first ':' (verified with the resulting hash).
     if (( "$(printf '%s' "$s" | LC_ALL=C tr -d '!-~' | wc -c)" > 0 )); then
-        die "Usa solo caracteres ASCII imprimibles: sin espacios, sin acentos y sin controles"
+        die "Use only printable ASCII characters: no spaces, no accents and no controls"
     fi
     len=${#s}
     if (( len < min )); then
-        die "La contraseña tiene $len caracteres, pero el mínimo configurado es $min (cámbialo en la pregunta de longitud mínima)"
+        die "The password has $len characters, but the configured minimum is $min (change it in the minimum length question)"
     fi
     if (( len < 12 )); then
-        printf '%sADVERTENCIA: contraseña de %d caracteres; es corta y vulnerable a fuerza bruta. No se bloquea, solo se avisa.%s\n' "${C_YELLOW:-}" "$len" "${C_RESET:-}" >&2
+        printf '%sWARNING: %d-character password; it is short and vulnerable to brute force. Not blocked, just a warning.%s\n' "${C_YELLOW:-}" "$len" "${C_RESET:-}" >&2
     fi
 }
 
 ask_secret() {
     local var="$1" prompt="$2" a="" b=""
     if (( ACCEPT_DEFAULTS && DRY_RUN )); then
-        printf -v "$var" '%s' 'Cambiar-Esta-Frase-2026!'
-        log "$prompt = (valor por defecto de simulación, oculto)"
+        printf -v "$var" '%s' 'Change-This-Phrase-2026!'
+        log "$prompt = (simulation default value, hidden)"
         return 0
     fi
     while true; do
         show_help
-        IFS= read -r -s -p "$(ui_prompt "$prompt (Enter vacío = ayuda completa): ")" a || die "Entrada cancelada"
+        IFS= read -r -s -p "$(ui_prompt "$prompt (empty Enter = full help): ")" a || die "Input cancelled"
         printf '\n'
-        # '?' puede ser una contraseña válida; usamos la entrada vacía
-        # (que de todos modos no sería una contraseña válida) como ayuda.
+        # '?' can be a valid password; we use the empty input (which
+        # would not be a valid password anyway) as the help trigger.
         if [[ -z "$a" ]]; then
             HELP_FULL=1
             HELP_SHOWN=""
-            printf 'Mostrando la explicación completa.\n'
+            printf 'Showing the full explanation.\n'
             continue
         fi
-        IFS= read -r -s -p "$(ui_prompt "Repite $prompt: ")" b || die "Entrada cancelada"
+        IFS= read -r -s -p "$(ui_prompt "Repeat $prompt: ")" b || die "Input cancelled"
         printf '\n'
         check_secret "$a"
-        [[ "$a" == "$b" ]] || { printf 'No coincide.\n'; continue; }
+        [[ "$a" == "$b" ]] || { printf 'Does not match.\n'; continue; }
         printf -v "$var" '%s' "$a"
         HELP_FN=""
         HELP_SHOWN=""
@@ -1681,53 +1691,53 @@ ask_secret() {
 
 ask_ip() {
     local var="$1" prompt="$2" default="$3" v=""
-    ask v "$prompt (IPv4 o IPv6 literal)" "$default"
-    is_ip "$v" || die "DNS inválido: $v (usa una IP literal)"
+    ask v "$prompt (literal IPv4 or IPv6)" "$default"
+    is_ip "$v" || die "Invalid DNS: $v (use a literal IP)"
     printf -v "$var" '%s' "$v"
 }
 
 ask_hex() {
     local var="$1" prompt="$2" default="$3" v=""
-    ask v "$prompt (RRGGBB o #RRGGBB)" "$default"
+    ask v "$prompt (RRGGBB or #RRGGBB)" "$default"
     v="${v#\#}"
-    [[ "$v" =~ ^[0-9A-Fa-f]{6}$ ]] || die "Color hexadecimal inválido: $v"
+    [[ "$v" =~ ^[0-9A-Fa-f]{6}$ ]] || die "Invalid hex colour: $v"
     printf -v "$var" '%s' "$v"
 }
 
 ask_label() {
     local var="$1" prompt="$2" default="$3" max="$4" v=""
     ask v "$prompt" "$default"
-    [[ ${#v} -le "$max" ]] || die "Etiqueta demasiado larga (máx $max)"
-    [[ "$v" =~ ^[A-Za-z0-9_.:-]+$ ]] || die "Etiqueta con caracteres no permitidos"
+    [[ ${#v} -le "$max" ]] || die "Label too long (max $max)"
+    [[ "$v" =~ ^[A-Za-z0-9_.:-]+$ ]] || die "Label with characters not allowed"
     printf -v "$var" '%s' "$v"
 }
 
 ask_num() {
     local var="$1" prompt="$2" default="$3" min="$4" max="$5" v=""
     ask v "$prompt" "$default"
-    [[ "$v" =~ ^[0-9]+$ ]] || die "Debe ser número"
-    (( v >= min && v <= max )) || die "Fuera de rango $min-$max"
+    [[ "$v" =~ ^[0-9]+$ ]] || die "Must be a number"
+    (( v >= min && v <= max )) || die "Out of range $min-$max"
     printf -v "$var" '%s' "$v"
 }
 
 validate_regex() {
     local var="$1" label="$2" re="$3"
-    [[ "${!var}" =~ $re ]] || die "$label inválido: ${!var}"
+    [[ "${!var}" =~ $re ]] || die "invalid $label: ${!var}"
 }
 
 confirm_wipe() {
     local ans=""
     if (( DRY_RUN || SIMULATE )); then
-        log "Confirmación de borrado omitida en simulación"
+        log "Wipe confirmation skipped in simulation"
         return 0
     fi
     HELP_FN=help_confirm
     HELP_SHOWN=""
     show_help
-    printf '\n%s=== PELIGRO ===%s\nSe borrará por completo %s.\n' "$C_RED" "$C_RESET" "$U"
+    printf '\n%s=== DANGER ===%s\n%s will be completely erased.\n' "$C_RED" "$C_RESET" "$U"
     lsblk -d -o NAME,MODEL,SERIAL,SIZE,TRAN,HOTPLUG "$U"
-    IFS= read -r -p "Escribe exactamente BORRAR $U para continuar: " ans || die "Cancelado"
-    [[ "$ans" == "BORRAR $U" ]] || die "No se confirmó el borrado"
+    IFS= read -r -p "Type exactly ERASE $U to continue: " ans || die "Cancelled"
+    [[ "$ans" == "ERASE $U" ]] || die "Wipe not confirmed"
     HELP_FN=""
     HELP_SHOWN=""
 }
@@ -1763,13 +1773,13 @@ set_defaults() {
     PBKDF=argon2id
     PBKDF_MEM=65536
     ROOT_FS=ext4
-    KERNEL_HARDENING=conservador
+    KERNEL_HARDENING=conservative
     PLYMOUTH_THEME=spinfinity
-    PLYMOUTH_FALLBACK=si
-    LIMINE_EDITOR=si
-    VERIFY_GPG=si
+    PLYMOUTH_FALLBACK=yes
+    LIMINE_EDITOR=yes
+    VERIFY_GPG=yes
     GREETER=greetd
-    GUI=si
+    GUI=yes
     WM=openbox
     COMPOSITOR=picom
     BAR=tint2
@@ -1780,34 +1790,34 @@ set_defaults() {
     BG=0b0f14
     FG=00ff9c
     ACCENT=55ffc8
-    ZRAM=si
+    ZRAM=yes
     ZRAM_SIZE=2048
     PIPEWIRE=minimal
     NETWORK=NetworkManager
-    FIREWALL=si
-    APPARMOR=si
+    FIREWALL=yes
+    APPARMOR=yes
     DOAS=no
     AUDITD=no
     SSH=no
-    FIRMWARE=completo
-    MICROCODE=ambos
-    UEFI=si
-    BIOS_BOOT=si
+    FIRMWARE=full
+    MICROCODE=both
+    UEFI=yes
+    BIOS_BOOT=yes
     UEFI_IA32=no
     SECURE_BOOT=no
     DNS1=1.1.1.1
     DNS2=8.8.8.8
-    DATA_POLICY=conservar
+    DATA_POLICY=keep
     INTRO_OK=no
     ALLOW_TARGET_MOUNTS=0
-    HOTPLUG_POLICY=permitir0
+    HOTPLUG_POLICY=allow0
     LIMINE_BIOS_FORCE=no
     SIZE_MIN_GB=50
     SIZE_MAX_GB=70
     CURL_RETRIES=3
     NETWORK_TIMEOUT=15
-    MAKE_HOST_BACKUP=si
-    CLEAN_TRACES=si
+    MAKE_HOST_BACKUP=yes
+    CLEAN_TRACES=yes
     EXTRA_PACKAGES_STR=""
     EXTRA_PACKAGES=()
     PKGS=()
@@ -1838,56 +1848,56 @@ CONFIG_KEYS=(
 )
 
 collect_preferences() {
-    log "=== Recogiendo preferencias (escribe ? para releer la explicación) ==="
+    log "=== Collecting preferences (type ? to re-read the explanation) ==="
     HELP_FN=help_intro;      HELP_SHOWN=""
-    ask_yes INTRO_OK "¿Entiendes que /dev/sda se borrará y que todo temporal vive en RAM?" "si"
-    [[ "$INTRO_OK" == si ]] || die "Cancelado: no se confirmó el entendimiento del borrado"
+    ask_yes INTRO_OK "Do you understand that /dev/sda will be erased and that everything temporary lives in RAM?" "yes"
+    [[ "$INTRO_OK" == yes ]] || die "Cancelled: the understanding of the wipe was not confirmed"
     HELP_FN=help_target;     HELP_SHOWN=""
-    ask U "Dispositivo destino (debe ser /dev/sda)" "$U"
-    [[ "$U" == /dev/sda ]] || die "Este instalador está fijado a /dev/sda; salida por seguridad"
+    ask U "Target device (must be /dev/sda)" "$U"
+    [[ "$U" == /dev/sda ]] || die "This installer is fixed to /dev/sda; bailing out for safety"
     B="${U}2"
     R="${U}3"
-    ask M "Punto de montaje temporal del sistema" "$M"
-    [[ "$M" = /* && "$M" != "/" ]] || die "Punto de montaje inválido: $M"
+    ask M "Temporary mount point of the system" "$M"
+    [[ "$M" = /* && "$M" != "/" ]] || die "Invalid mount point: $M"
 
     HELP_FN=help_disk_checks; HELP_SHOWN=""
-    menu HOTPLUG_POLICY "Política de HOTPLUG para /dev/sda" 1 "permitir0" "exigir1" "omitir"
-    ask_num SIZE_MIN_GB "Tamaño mínimo del disco (GB decimales)" "$SIZE_MIN_GB" 1 2000
-    ask_num SIZE_MAX_GB "Tamaño máximo del disco (GB decimales)" "$SIZE_MAX_GB" 1 2000
-    (( SIZE_MIN_GB <= SIZE_MAX_GB )) || die "El mínimo no puede superar el máximo"
-    ask_num CURL_RETRIES "Reintentos de curl" "$CURL_RETRIES" 0 10
-    ask_num NETWORK_TIMEOUT "Timeout de conexión de curl (segundos)" "$NETWORK_TIMEOUT" 1 120
+    menu HOTPLUG_POLICY "HOTPLUG policy for /dev/sda" 1 "allow0" "require1" "skip"
+    ask_num SIZE_MIN_GB "Minimum disk size (decimal GB)" "$SIZE_MIN_GB" 1 2000
+    ask_num SIZE_MAX_GB "Maximum disk size (decimal GB)" "$SIZE_MAX_GB" 1 2000
+    (( SIZE_MIN_GB <= SIZE_MAX_GB )) || die "The minimum cannot exceed the maximum"
+    ask_num CURL_RETRIES "curl retries" "$CURL_RETRIES" 0 10
+    ask_num NETWORK_TIMEOUT "curl connection timeout (seconds)" "$NETWORK_TIMEOUT" 1 120
 
     HELP_FN=help_workdir;    HELP_SHOWN=""
-    menu DATA_POLICY "¿Qué hago con estado y respaldos en RAM?" 1 "conservar" "borrar" "sin respaldos"
+    menu DATA_POLICY "What should I do with state and backups in RAM?" 1 "keep" "delete" "no-backups"
     case "$DATA_POLICY" in
-        conservar) MAKE_HOST_BACKUP=si ;;
-        borrar)    MAKE_HOST_BACKUP=si ;;
-        "sin respaldos") MAKE_HOST_BACKUP=no ;;
+        keep) MAKE_HOST_BACKUP=yes ;;
+        delete)    MAKE_HOST_BACKUP=yes ;;
+        "no-backups") MAKE_HOST_BACKUP=no ;;
     esac
     if (( ! LOG_GIVEN )); then
-        ask LOG_FILE "Ruta del log" "$ARTIFACT_DIR/install.log"
+        ask LOG_FILE "Log path" "$ARTIFACT_DIR/install.log"
     fi
     derive_paths
 
     HELP_FN=help_identity;   HELP_SHOWN=""
-    ask HOSTNAME_DEB "Nombre de host" "$HOSTNAME_DEB"
+    ask HOSTNAME_DEB "Hostname" "$HOSTNAME_DEB"
     validate_regex HOSTNAME_DEB "hostname" '^[a-z][a-z0-9-]{0,62}$'
-    ask USERNAME "Usuario" "$USERNAME"
-    validate_regex USERNAME "usuario" '^[a-z_][a-z0-9_-]{0,31}$'
-    menu USER_SHELL "Shell del usuario" 1 "/bin/bash" "/bin/zsh" "/bin/dash"
-    ask_num PASS_MIN_LEN "Longitud mínima de contraseñas (1 = sin mínimo)" "$PASS_MIN_LEN" 1 4096
-    ask_secret USER_PASS "Contraseña del usuario"
-    ask_secret ROOT_PASS "Contraseña de root"
-    ask_secret LUKS_PASS "Frase LUKS (ASCII, sin acentos)"
+    ask USERNAME "User name" "$USERNAME"
+    validate_regex USERNAME "user name" '^[a-z_][a-z0-9_-]{0,31}$'
+    menu USER_SHELL "User shell" 1 "/bin/bash" "/bin/zsh" "/bin/dash"
+    ask_num PASS_MIN_LEN "Minimum password length (1 = no minimum)" "$PASS_MIN_LEN" 1 4096
+    ask_secret USER_PASS "User password"
+    ask_secret ROOT_PASS "root password"
+    ask_secret LUKS_PASS "LUKS passphrase (ASCII, no accents)"
 
     HELP_FN=help_locale;     HELP_SHOWN=""
     menu LOCALE "Locale" 1 "en_US.UTF-8" "C.UTF-8" "es_AR.UTF-8"
-    menu TZ_AREA "Zona horaria" 1 "America/Argentina/Buenos_Aires" "UTC" "Etc/UTC"
-    menu KEYMAP "Teclado" 1 "latam" "es" "us"
+    menu TZ_AREA "Time zone" 1 "America/Argentina/Buenos_Aires" "UTC" "Etc/UTC"
+    menu KEYMAP "Keyboard" 1 "latam" "es" "us"
 
     HELP_FN=help_mirror;     HELP_SHOWN=""
-    menu MIRROR "Mirror Debian" 1 \
+    menu MIRROR "Debian mirror" 1 \
         "https://mirror.sitsa.com.ar/debian" \
         "https://debian.c3sl.ufpr.br/debian" \
         "https://deb.debian.org/debian"
@@ -1895,134 +1905,134 @@ collect_preferences() {
         *c3sl*) SECURITY="https://debian.c3sl.ufpr.br/debian-security" ;;
         *) SECURITY="https://security.debian.org/debian-security" ;;
     esac
-    ask SECURITY "Mirror de seguridad" "$SECURITY"
-    [[ "$SECURITY" == https://* ]] || die "El mirror de seguridad debe usar HTTPS"
+    ask SECURITY "Security mirror" "$SECURITY"
+    [[ "$SECURITY" == https://* ]] || die "The security mirror must use HTTPS"
 
     HELP_FN=help_components; HELP_SHOWN=""
-    ask COMPONENTS "Componentes APT (separados por comas)" "$COMPONENTS"
-    validate_regex COMPONENTS "componentes" '^[a-z0-9,+-]+$'
+    ask COMPONENTS "APT components (comma-separated)" "$COMPONENTS"
+    validate_regex COMPONENTS "components" '^[a-z0-9,+-]+$'
 
     HELP_FN=help_firmware;   HELP_SHOWN=""
-    menu FIRMWARE "Perfil de firmware" 1 "completo" "minimo" "ninguno"
+    menu FIRMWARE "Firmware profile" 1 "full" "minimal" "none"
     case "$FIRMWARE" in
-        completo|minimo) COMPONENTS="main,contrib,non-free-firmware" ;;
-        ninguno) COMPONENTS="main" ;;
+        full|minimal) COMPONENTS="main,contrib,non-free-firmware" ;;
+        none) COMPONENTS="main" ;;
     esac
     HELP_FN=help_microcode;  HELP_SHOWN=""
-    menu MICROCODE "Microcódigo" 1 "ambos" "intel" "amd" "ninguno"
+    menu MICROCODE "Microcode" 1 "both" "intel" "amd" "none"
 
     HELP_FN=help_partitions; HELP_SHOWN=""
-    menu ESP_SIZE "Tamaño de ESP" 2 "512M" "1G" "2G"
-    menu BIOS_SIZE "Tamaño BIOS Boot" 2 "1M" "2M" "8M"
-    ask_label BOOT_LABEL "Etiqueta FAT32" "$BOOT_LABEL" 11
-    ask_label ROOT_LABEL "Etiqueta raíz" "$ROOT_LABEL" 16
-    ask_label LUKS_LABEL "Etiqueta LUKS" "$LUKS_LABEL" 32
+    menu ESP_SIZE "ESP size" 2 "512M" "1G" "2G"
+    menu BIOS_SIZE "BIOS Boot size" 2 "1M" "2M" "8M"
+    ask_label BOOT_LABEL "FAT32 label" "$BOOT_LABEL" 11
+    ask_label ROOT_LABEL "Root label" "$ROOT_LABEL" 16
+    ask_label LUKS_LABEL "LUKS label" "$LUKS_LABEL" 32
 
     HELP_FN=help_luks;       HELP_SHOWN=""
-    menu PBKDF "KDF de LUKS" 1 "argon2id" "pbkdf2"
+    menu PBKDF "LUKS KDF" 1 "argon2id" "pbkdf2"
     if [[ "$PBKDF" == argon2id ]]; then
-        menu PBKDF_MEM "Memoria Argon2id (KiB)" 1 "65536" "131072" "262144" "524288"
+        menu PBKDF_MEM "Argon2id memory (KiB)" 1 "65536" "131072" "262144" "524288"
     fi
     HELP_FN=help_rootfs;     HELP_SHOWN=""
-    menu ROOT_FS "Sistema de archivos raíz" 1 "ext4" "btrfs"
+    menu ROOT_FS "Root filesystem" 1 "ext4" "btrfs"
 
     HELP_FN=help_hardening;  HELP_SHOWN=""
-    menu KERNEL_HARDENING "Endurecimiento del kernel" 1 "conservador" "agresivo" "ninguno"
+    menu KERNEL_HARDENING "Kernel hardening" 1 "conservative" "aggressive" "none"
     HELP_FN=help_plymouth;   HELP_SHOWN=""
-    menu PLYMOUTH_THEME "Tema Plymouth" 1 "spinfinity" "spinner" "text" "details" "ninguno"
-    ask_yes PLYMOUTH_FALLBACK "Incluir entrada de arranque sin Plymouth" "si"
+    menu PLYMOUTH_THEME "Plymouth theme" 1 "spinfinity" "spinner" "text" "details" "none"
+    ask_yes PLYMOUTH_FALLBACK "Include a boot entry without Plymouth" "yes"
 
     HELP_FN=help_limine;     HELP_SHOWN=""
-    ask_yes LIMINE_EDITOR "Permitir editor de Limine" "si"
-    ask_yes VERIFY_GPG "Verificar firma GPG de Limine" "si"
+    ask_yes LIMINE_EDITOR "Allow the Limine editor" "yes"
+    ask_yes VERIFY_GPG "Verify the Limine GPG signature" "yes"
 
-    # Primero se pregunta si hay X11 y DESPUÉS el greeter: al revés,
-    # elegir greetd/ly y luego GUI=no era un callejón sin salida.
+    # First it asks whether there is X11 and THEN the greeter: the
+    # other way around, choosing greetd/ly and then GUI=no was a dead end.
     HELP_FN=help_gui;        HELP_SHOWN=""
-    # El default es el valor ACTUAL ($GUI), no un "si" fijo: así un
-    # --config con GUI=no seguido de --yes no vuelve a activar X11.
-    ask_yes GUI "Instalar entorno gráfico X11" "$GUI"
+    # The default is the CURRENT value ($GUI), not a fixed "yes": that
+    # way a --config with GUI=no followed by --yes does not re-enable X11.
+    ask_yes GUI "Install the X11 graphical environment" "$GUI"
     if [[ "$GUI" == no ]]; then
-        GREETER=consola
-        WM=ninguno
-        COMPOSITOR=ninguno
-        BAR=ninguno
-        LAUNCHER=ninguno
-        TERMINAL=ninguno
-        log "GUI=no: greeter=consola y sin ningún componente gráfico"
+        GREETER=console
+        WM=none
+        COMPOSITOR=none
+        BAR=none
+        LAUNCHER=none
+        TERMINAL=none
+        log "GUI=no: greeter=console and no graphical component at all"
     else
         HELP_FN=help_greeter;    HELP_SHOWN=""
         local_greeter_default=1
         case "$GREETER" in
             ly) local_greeter_default=2 ;;
-            consola) local_greeter_default=3 ;;
+            console) local_greeter_default=3 ;;
         esac
-        menu GREETER "Gestor de inicio de sesión" "$local_greeter_default" "greetd" "ly" "consola"
+        menu GREETER "Session login manager" "$local_greeter_default" "greetd" "ly" "console"
     fi
-    if [[ "$GUI" == si ]]; then
-        menu WM "WM" 1 "openbox" "ninguno"
-        menu COMPOSITOR "Compositor" 1 "picom" "ninguno"
-        menu BAR "Barra" 1 "tint2" "ninguno"
-        menu LAUNCHER "Lanzador" 1 "rofi" "ninguno"
-        menu TERMINAL "Terminal" 1 "xterm" "alacritty" "ambas"
-        menu FONT_PKG "Fuente monoespaciada" 1 "fonts-jetbrains-mono" "fonts-dejavu-core" "xfonts-terminus"
+    if [[ "$GUI" == yes ]]; then
+        menu WM "WM" 1 "openbox" "none"
+        menu COMPOSITOR "Compositor" 1 "picom" "none"
+        menu BAR "Bar" 1 "tint2" "none"
+        menu LAUNCHER "Launcher" 1 "rofi" "none"
+        menu TERMINAL "Terminal" 1 "xterm" "alacritty" "both"
+        menu FONT_PKG "Monospace font" 1 "fonts-jetbrains-mono" "fonts-dejavu-core" "xfonts-terminus"
         case "$FONT_PKG" in
             fonts-jetbrains-mono) FONT="JetBrains Mono" ;;
             fonts-dejavu-core) FONT="DejaVu Sans Mono" ;;
             xfonts-terminus) FONT="Terminus" ;;
         esac
-        ask_hex BG "Color de fondo" "$BG"
-        ask_hex FG "Color de texto" "$FG"
-        ask_hex ACCENT "Color de acento" "$ACCENT"
+        ask_hex BG "Background colour" "$BG"
+        ask_hex FG "Text colour" "$FG"
+        ask_hex ACCENT "Accent colour" "$ACCENT"
     fi
 
     HELP_FN=help_zram;       HELP_SHOWN=""
-    ask_yes ZRAM "Usar ZRAM" "si"
-    if [[ "$ZRAM" == si ]]; then
-        menu ZRAM_SIZE "Tamaño máximo ZRAM (MiB)" 1 "2048" "4096" "1024"
+    ask_yes ZRAM "Use ZRAM" "yes"
+    if [[ "$ZRAM" == yes ]]; then
+        menu ZRAM_SIZE "Maximum ZRAM size (MiB)" 1 "2048" "4096" "1024"
     fi
     HELP_FN=help_pipewire;   HELP_SHOWN=""
-    menu PIPEWIRE "PipeWire" 1 "minimal" "bluetooth" "ninguno"
+    menu PIPEWIRE "PipeWire" 1 "minimal" "bluetooth" "none"
     HELP_FN=help_network;    HELP_SHOWN=""
-    menu NETWORK "Red" 1 "NetworkManager" "dhcpcd" "ninguno"
+    menu NETWORK "Network" 1 "NetworkManager" "dhcpcd" "none"
 
     HELP_FN=help_security;   HELP_SHOWN=""
-    ask_yes FIREWALL "Activar nftables" "si"
-    ask_yes APPARMOR "Instalar AppArmor" "si"
-    ask_yes DOAS "Instalar doas además de sudo" "no"
-    ask_yes AUDITD "Instalar auditd" "no"
-    ask_yes SSH "Instalar openssh-server" "no"
+    ask_yes FIREWALL "Enable nftables" "yes"
+    ask_yes APPARMOR "Install AppArmor" "yes"
+    ask_yes DOAS "Install doas in addition to sudo" "no"
+    ask_yes AUDITD "Install auditd" "no"
+    ask_yes SSH "Install openssh-server" "no"
 
     HELP_FN=help_bootmodes;  HELP_SHOWN=""
-    menu UEFI "Arranque UEFI x64" 1 "si" "no"
-    menu BIOS_BOOT "Arranque BIOS/Legacy" 1 "si" "no"
-    menu UEFI_IA32 "Copiar BOOTIA32.EFI" 1 "no" "si"
-    menu SECURE_BOOT "Secure Boot activo en el firmware" 1 "no" "si"
-    [[ "$SECURE_BOOT" == "no" ]] || die "Secure Boot debe estar desactivado para esta USB portable"
+    menu UEFI "UEFI x64 boot" 1 "yes" "no"
+    menu BIOS_BOOT "BIOS/Legacy boot" 1 "yes" "no"
+    menu UEFI_IA32 "Copy BOOTIA32.EFI" 1 "no" "yes"
+    menu SECURE_BOOT "Secure Boot enabled in the firmware" 1 "no" "yes"
+    [[ "$SECURE_BOOT" == "no" ]] || die "Secure Boot must be disabled for this portable USB"
 
     HELP_FN=help_bios_install; HELP_SHOWN=""
-    menu LIMINE_BIOS_FORCE "¿Añadir --force a limine bios-install?" 1 "no" "si"
+    menu LIMINE_BIOS_FORCE "Add --force to limine bios-install?" 1 "no" "yes"
 
     HELP_FN=help_dns;        HELP_SHOWN=""
-    ask_ip DNS1 "DNS primario" "$DNS1"
-    ask_ip DNS2 "DNS secundario" "$DNS2"
+    ask_ip DNS1 "Primary DNS" "$DNS1"
+    ask_ip DNS2 "Secondary DNS" "$DNS2"
 
     HELP_FN=help_extras;     HELP_SHOWN=""
-    ask EXTRA_PACKAGES_STR "Paquetes adicionales separados por espacios (vacío = ninguno)" "$EXTRA_PACKAGES_STR"
+    ask EXTRA_PACKAGES_STR "Extra packages separated by spaces (empty = none)" "$EXTRA_PACKAGES_STR"
     parse_extra_packages
-    ask_yes CLEAN_TRACES "Limpiar rastros del instalador en el sistema instalado" "si"
+    ask_yes CLEAN_TRACES "Clean installer traces in the installed system" "yes"
 
     confirm_wipe
     HELP_FN=""
     HELP_SHOWN=""
 }
 
-# ---------------------------- validacion y entorno ----------------------------
+# ---------------------------- validation and environment ----------------------------
 
 self_check() {
-    log "=== Autocomprobación estática ==="
+    log "=== Static self-check ==="
     # shellcheck disable=SC2016
-    # Los literales con $MIRROR/$SUITE se buscan tal cual dentro de este archivo.
+    # The literals with $MIRROR/$SUITE are searched verbatim inside this file.
     local checks=(
         '^set -Eeuo pipefail$'
         'trap cleanup EXIT'
@@ -2083,10 +2093,10 @@ self_check() {
         '/etc/kernel/postinst.d/zz-limine-update'
         '/etc/kernel/postrm.d/zz-limine-update'
         '/etc/initramfs/post-update.d/zz-limine-update'
-        'GUI=no confirmado: sin Xorg'
+        'GUI=no confirmed: no Xorg'
         'conv=fsync status=none'
-        'El anfitrión está rechazando escrituras dentro de'
-        'GUI=no: no se crea /etc/X11 en el sistema instalado'
+        'The host is rejecting writes inside'
+        'GUI=no: /etc/X11 is not created in the installed system'
         'xserver-xorg-core xserver-xorg-input-all xserver-xorg-video-all xauth xinit x11-xkb-utils x11-xserver-utils libgl1-mesa-dri mesa-utils'
         'ui_banner'
         'ui_progress'
@@ -2094,7 +2104,7 @@ self_check() {
     )
     local c
     for c in "${checks[@]}"; do
-        grep -qF -- "$c" "$0" || die "Falta comprobación de diseño: $c"
+        grep -qF -- "$c" "$0" || die "Missing design check: $c"
     done
     local banned1="REEM""PLAZAR" banned2="/mnt/""backup" banned3="linux""-hardened"
     local banned4="usb""-host" banned5="ev""al" banned6="deb""usb"
@@ -2108,45 +2118,45 @@ self_check() {
     local banned23="ip6 nexthdr ipv6""-icmp"
     local banned24="        x11""-xkb-utils x11-xserver-utils"
     local banned25="curl wget gnupg xz-utils zstd less nano htop pciutils usbutils x11""-"
-    grep -qF -- "$banned1" "$0" && die "Quedan marcadores prohibidos"
-    grep -qF -- "$banned2" "$0" && die "Queda ruta de respaldo anterior"
-    grep -qF -- "$banned3" "$0" && die "Kernel inexistente en Debian detectado"
-    grep -qF -- "$banned4" "$0" && die "Dispositivo anfitrión prohibido"
-    grep -qE -- "(^|[[:space:]])$banned5([[:space:]]|$)" "$0" && die "Construcción dinámica prohibida"
-    grep -qiF -- "$banned6" "$0" && die "Queda el nombre de proyecto anterior"
-    grep -qF -- "$banned7" "$0" && die "Queda punto de montaje de respaldo anterior"
-    grep -qF -- "$banned8" "$0" && die "Queda referencia al anfitrión"
-    grep -qF -- "$banned9" "$0" && die "Queda imagen auxiliar anterior"
-    grep -qF -- "$banned10" "$0" && die "Queda identificacion de disco del anfitrion"
-    grep -qF -- "$banned11" "$0" && die "Queda carpeta compartida anterior"
-    grep -qF -- "$banned12" "$0" && die "Queda variable del anfitrion"
-    grep -qF -- "$banned13" "$0" && die "Vuelve una tubería hacia grep silencioso (falso negativo por EPIPE)"
-    grep -qF -- "$banned14" "$0" && die "Vuelve el rango de tamano rigido 58-61 GB"
-    grep -qF -- "$banned15" "$0" && die "Vuelve el guard HOTPLUG=1 rigido"
-    grep -qF -- "$banned16" "$0" && die "base64 no es paquete APT"
-    grep -qF -- "$banned17" "$0" && die "xsetroot no es paquete APT"
-    grep -qF -- "$banned18" "$0" && die "doas es transicional; usar opendoas"
-    grep -qF -- "$banned19" "$0" && die "Vuelve una peticion HEAD sin seguir redirecciones"
-    grep -qF -- "$banned20" "$0" && die "Vuelve wipefs sobre particiones (E/S sub-sector)"
-    grep -qF -- "$banned21" "$0" && die "Vuelve la limpieza de ESP/LUKS en etapa 2"
-    grep -qF -- "$banned22" "$0" && die "Vuelve Components con comas en deb822"
-    grep -qF -- "$banned23" "$0" && die "Vuelve ip6 nexthdr ipv6""-icmp sin netbase"
-    grep -qF -- "$banned24" "$0" && die "Vuelven paquetes X11 en la lista base (GUI=no instalaria X11)"
-    grep -qF -- "$banned25" "$0" && die "Vuelve X11 pegado a la lista base de paquetes"
-    grep -q -- 'run sgdisk --zap-all' "$0" || die "Falta trazabilidad de sgdisk"
-    grep -q -- 'run cryptsetup luksFormat' "$0" || die "Falta trazabilidad de luksFormat"
-    grep -q -- 'run mkfs.fat' "$0" || die "Falta trazabilidad de mkfs.fat"
-    grep -q -- 'CLEAN_TRACES' "$0" || die "Falta limpieza de rastros"
+    grep -qF -- "$banned1" "$0" && die "Forbidden markers remain"
+    grep -qF -- "$banned2" "$0" && die "An old backup path remains"
+    grep -qF -- "$banned3" "$0" && die "Nonexistent kernel in Debian detected"
+    grep -qF -- "$banned4" "$0" && die "Forbidden host device"
+    grep -qE -- "(^|[[:space:]])$banned5([[:space:]]|$)" "$0" && die "Forbidden dynamic construction"
+    grep -qiF -- "$banned6" "$0" && die "The old project name remains"
+    grep -qF -- "$banned7" "$0" && die "An old backup mount point remains"
+    grep -qF -- "$banned8" "$0" && die "A reference to the host remains"
+    grep -qF -- "$banned9" "$0" && die "An old auxiliary image remains"
+    grep -qF -- "$banned10" "$0" && die "A host disk identification remains"
+    grep -qF -- "$banned11" "$0" && die "An old shared folder remains"
+    grep -qF -- "$banned12" "$0" && die "A host variable remains"
+    grep -qF -- "$banned13" "$0" && die "A pipe into a silent grep is back (false negative due to EPIPE)"
+    grep -qF -- "$banned14" "$0" && die "The rigid 58-61 GB size range is back"
+    grep -qF -- "$banned15" "$0" && die "The rigid HOTPLUG=1 guard is back"
+    grep -qF -- "$banned16" "$0" && die "base64 is not an APT package"
+    grep -qF -- "$banned17" "$0" && die "xsetroot is not an APT package"
+    grep -qF -- "$banned18" "$0" && die "doas is transitional; use opendoas"
+    grep -qF -- "$banned19" "$0" && die "A HEAD request without following redirects is back"
+    grep -qF -- "$banned20" "$0" && die "wipefs on partitions is back (sub-sector I/O)"
+    grep -qF -- "$banned21" "$0" && die "The ESP/LUKS cleanup in stage 2 is back"
+    grep -qF -- "$banned22" "$0" && die "Components with commas in deb822 is back"
+    grep -qF -- "$banned23" "$0" && die "ip6 nexthdr ipv6""-icmp without netbase is back"
+    grep -qF -- "$banned24" "$0" && die "X11 packages are back in the base list (GUI=no would install X11)"
+    grep -qF -- "$banned25" "$0" && die "X11 glued to the base package list is back"
+    grep -q -- 'run sgdisk --zap-all' "$0" || die "Missing sgdisk traceability"
+    grep -q -- 'run cryptsetup luksFormat' "$0" || die "Missing luksFormat traceability"
+    grep -q -- 'run mkfs.fat' "$0" || die "Missing mkfs.fat traceability"
+    grep -q -- 'CLEAN_TRACES' "$0" || die "Missing trace cleanup"
     # shellcheck disable=SC2016
-    # El literal con $BIOSP se busca tal cual dentro de este archivo.
-    grep -qF -- 'clean_partition_start "$BIOSP"' "$0" || die "Falta la limpieza de la BIOS Boot antes de bios-install"
-    grep -qF -- 'LIMINE_BIOS_FORCE=si; se anade --force' "$0" || die "Falta la rama --force condicional"
-    log "Autocomprobación estática OK"
+    # The literal with $BIOSP is searched verbatim inside this file.
+    grep -qF -- 'clean_partition_start "$BIOSP"' "$0" || die "Missing the BIOS Boot cleanup before bios-install"
+    grep -qF -- 'LIMINE_BIOS_FORCE=yes; adding --force' "$0" || die "Missing the conditional --force branch"
+    log "Static self-check OK"
     return 0
 }
 
 install_host_deps() {
-    log "=== Instalando herramientas en el live (no en el sistema destino) ==="
+    log "=== Installing tools in the live session (not in the target system) ==="
     local deps=(
         debootstrap debian-archive-keyring gdisk dosfstools cryptsetup-bin parted
         gnupg curl wget ca-certificates git build-essential pkg-config
@@ -2167,106 +2177,106 @@ install_host_deps() {
 }
 
 check_tmp_space() {
-    log "=== Espacio disponible en /tmp (tmpfs en RAM) ==="
+    log "=== Free space in /tmp (tmpfs in RAM) ==="
     if (( DRY_RUN || SIMULATE )); then
-        log "Comprobación de RAM omitida en simulación"
+        log "RAM check skipped in simulation"
         return 0
     fi
     local avail
     avail="$(df -B1 --output=avail /tmp | tail -n 1 | tr -d ' ')"
-    log "Disponible en /tmp: $avail bytes"
+    log "Available in /tmp: $avail bytes"
     if [[ "$GREETER" == ly ]] && (( avail < 1200000000 )); then
-        printf '\nADVERTENCIA: elegiste ly, que compila con Zig y necesita ~1 GB libres.\n'
-        printf 'Solo hay ~%s MB. Puede fallar con NoSpaceLeft.\n' "$((avail/1000000))"
-        printf 'Recomendacion: cambia a greetd (paquete Debian, sin toolchain).\n\n'
+        printf '\nWARNING: you chose ly, which compiles with Zig and needs ~1 GB free.\n'
+        printf 'There is only ~%s MB. It may fail with NoSpaceLeft.\n' "$((avail/1000000))"
+        printf 'Recommendation: switch to greetd (Debian package, no toolchain).\n\n'
         local ans
-        IFS= read -r -p "¿Cambiar a greetd ahora? [s/n, por defecto s]: " ans || true
-        ans="${ans:-s}"
+        IFS= read -r -p "Switch to greetd now? [y/n, default y]: " ans || true
+        ans="${ans:-y}"
         case "$ans" in
-            s|S|si|SI) GREETER=greetd; log "Cambiado a greetd por falta de RAM" ;;
-            *) log "Se mantiene ly bajo responsabilidad del usuario" ;;
+            y|Y|yes|YES) GREETER=greetd; log "Switched to greetd due to low RAM" ;;
+            *) log "Keeping ly at the user's own risk" ;;
         esac
     fi
 }
 
-# ---------------------------- red y guardas de disco ----------------------------
+# ---------------------------- network and disk guards ----------------------------
 
 head_url() {
     local url="$1" label="$2"
-    log "+ comprobar $label: $url"
+    log "+ check $label: $url"
     if (( DRY_RUN || SIMULATE )); then
         return 0
     fi
     curl -fsSIL --retry "$CURL_RETRIES" --retry-delay 2 \
         --connect-timeout "$NETWORK_TIMEOUT" --max-time "$((NETWORK_TIMEOUT * 8))" \
-        -o /dev/null "$url" || die "$label no accesible: $url"
+        -o /dev/null "$url" || die "$label not reachable: $url"
 }
 
 download_file() {
     local url="$1" dest="$2" label="$3"
-    log "+ descargar $label: $url -> $dest"
+    log "+ download $label: $url -> $dest"
     if (( DRY_RUN || SIMULATE )); then
         return 0
     fi
     curl -fsSL --retry "$CURL_RETRIES" --retry-delay 2 \
         --connect-timeout "$NETWORK_TIMEOUT" --max-time "$((NETWORK_TIMEOUT * 30))" \
-        -o "$dest" "$url" || die "No se pudo descargar $label: $url"
-    [[ -s "$dest" ]] || die "$label descargado vacío: $url"
+        -o "$dest" "$url" || die "Could not download $label: $url"
+    [[ -s "$dest" ]] || die "downloaded $label is empty: $url"
 }
 
-# NUNCA encadenar curl con un grep silencioso: ese grep cierra la tubería
-# en cuanto encuentra el patrón, curl recibe EPIPE (error 23) y pipefail
-# convierte eso en un falso negativo. Se descarga a fichero y se busca
-# dentro del fichero ya cerrado.
+# NEVER chain curl into a silent grep: that grep closes the pipe as soon
+# as it finds the pattern, curl receives EPIPE (error 23) and pipefail
+# turns that into a false negative. Download to a file and search inside
+# the already-closed file.
 check_release_codename() {
     local file="$1" expected="$2" label="$3"
     if (( DRY_RUN || SIMULATE )); then
-        log "+ (simulación) comprobar $label contiene 'Codename: $expected'"
+        log "+ (simulation) check $label contains 'Codename: $expected'"
         return 0
     fi
-    grep -qF -- "Codename: $expected" "$file" || die "$label no contiene 'Codename: $expected'"
+    grep -qF -- "Codename: $expected" "$file" || die "$label does not contain 'Codename: $expected'"
 }
 
-# Guardas PURAS: reciben valores ya leídos, para poder probarlas sin disco.
+# PURE guards: they receive already-read values, so they can be tested without a disk.
 check_disk_guards() {
     local hotplug="$1" tran="$2" size="$3" min max
-    log "Guardas de disco: HOTPLUG=$hotplug TRAN=$tran SIZE=$size bytes"
+    log "Disk guards: HOTPLUG=$hotplug TRAN=$tran SIZE=$size bytes"
     case "$HOTPLUG_POLICY" in
-        permitir0)
-            [[ "$hotplug" == "0" || "$hotplug" == "1" ]] || die "HOTPLUG=$hotplug no es 0 ni 1; revisa $U"
+        allow0)
+            [[ "$hotplug" == "0" || "$hotplug" == "1" ]] || die "HOTPLUG=$hotplug is neither 0 nor 1; check $U"
             if [[ "$hotplug" == "0" ]]; then
-                log "AVISO: HOTPLUG=0 (normal en QEMU usb-storage); aceptado por HOTPLUG_POLICY=permitir0"
+                log "WARNING: HOTPLUG=0 (normal with QEMU usb-storage); accepted by HOTPLUG_POLICY=allow0"
             fi
             ;;
-        exigir1)
-            [[ "$hotplug" == "1" ]] || die "HOTPLUG=$hotplug; se exigía 1. Usa HOTPLUG_POLICY=permitir0 si estás en QEMU"
+        require1)
+            [[ "$hotplug" == "1" ]] || die "HOTPLUG=$hotplug; 1 was required. Use HOTPLUG_POLICY=allow0 if you are in QEMU"
             ;;
-        omitir)
-            log "AVISO: comprobación de HOTPLUG omitida por elección del usuario"
+        skip)
+            log "WARNING: HOTPLUG check skipped by user choice"
             ;;
         *)
-            die "HOTPLUG_POLICY inválida: $HOTPLUG_POLICY"
+            die "Invalid HOTPLUG_POLICY: $HOTPLUG_POLICY"
             ;;
     esac
-    [[ "$tran" == "usb" ]] || die "TRAN=$tran no es 'usb'; $U no parece el USB de la VM"
+    [[ "$tran" == "usb" ]] || die "TRAN=$tran is not 'usb'; $U does not look like the VM USB"
     min=$(( SIZE_MIN_GB * 1000000000 ))
     max=$(( SIZE_MAX_GB * 1000000000 ))
     if (( size < min || size > max )); then
-        die "Tamaño $size bytes fuera del rango ${SIZE_MIN_GB}-${SIZE_MAX_GB} GB decimales; ajusta SIZE_MIN_GB/SIZE_MAX_GB"
+        die "Size $size bytes outside the range ${SIZE_MIN_GB}-${SIZE_MAX_GB} decimal GB; adjust SIZE_MIN_GB/SIZE_MAX_GB"
     fi
-    log "Guardas de disco OK"
+    log "Disk guards OK"
 }
 
 preflight() {
     log "=== Preflight ==="
     if (( SIMULATE || DRY_RUN )); then
-        log "Preflight de dispositivo omitido en simulación"
+        log "Device preflight skipped in simulation"
         install_host_deps
         check_tmp_space
         return 0
     fi
     require_root
-    grep -q -- '^VERSION_CODENAME=trixie$' /etc/os-release || die "El live no es Debian 13 trixie"
+    grep -q -- '^VERSION_CODENAME=trixie$' /etc/os-release || die "The live session is not Debian 13 trixie"
 
     download_file "$MIRROR/dists/$SUITE/Release" "$SCRATCH_DIR_REAL/debian-Release" "Release de $SUITE"
     check_release_codename "$SCRATCH_DIR_REAL/debian-Release" trixie "Release de $SUITE"
@@ -2285,12 +2295,12 @@ preflight() {
         require_cmd "$c"
     done
     [[ "$ROOT_FS" == btrfs ]] && require_cmd mkfs.btrfs
-    [[ -r /usr/share/keyrings/debian-archive-keyring.gpg ]] || die "Falta debian-archive-keyring"
+    [[ -r /usr/share/keyrings/debian-archive-keyring.gpg ]] || die "debian-archive-keyring is missing"
 
-    test -b "$U" || die "$U no es dispositivo de bloque"
+    test -b "$U" || die "$U is not a block device"
     lsblk -d -o NAME,MODEL,SERIAL,SIZE,TRAN,HOTPLUG "$U"
-    # Informativo: si udevadm no expone esas claves, grep devuelve 1 y con
-    # pipefail + ERR eso abortaría. "|| true" lo convierte en no bloqueante.
+    # Informational: if udevadm does not expose those keys, grep returns 1
+    # and with pipefail + ERR that would abort. "|| true" makes it non-blocking.
     udevadm info --query=property --name="$U" | grep -E -- '^(ID_BUS|ID_MODEL|ID_SERIAL|ID_PATH)=' || true
 
     local hotplug tran size mounts
@@ -2299,13 +2309,13 @@ preflight() {
     size="$(lsblk -dn -o SIZE -b "$U")"
     check_disk_guards "$hotplug" "$tran" "$size"
     if (( ALLOW_TARGET_MOUNTS )); then
-        log "Montajes de $M y $M/boot permitidos por --resume avanzado"
+        log "Mounts of $M and $M/boot allowed by advanced --resume"
     else
-        # Sin tubería: un grep silencioso también cerraría el pipe y daría
-        # un falso "hay particiones montadas" por EPIPE de lsblk.
+        # No pipe: a silent grep would also close the pipe and give a
+        # false "there are mounted partitions" due to lsblk's EPIPE.
         mounts="$(lsblk -rno MOUNTPOINTS "$U")"
         if [[ -n "${mounts//[[:space:]]/}" ]]; then
-            die "Hay particiones montadas en $U; desmóntalas antes"
+            die "There are mounted partitions on $U; unmount them first"
         fi
     fi
     log "Preflight OK"
@@ -2318,9 +2328,9 @@ ensure_target_dirs() {
         "$M/etc/systemd" \
         "$M/boot/EFI/BOOT" \
         "$M/dev" "$M/proc" "$M/sys" "$M/run"
-    # Sin X11 no se crea ni siquiera el directorio /etc/X11 vacío,
-    # y sin greetd no se crea /etc/greetd: nada de restos gráficos.
-    if [[ "$GUI" == si ]]; then
+    # Without X11 not even the empty /etc/X11 directory is created,
+    # and without greetd there is no /etc/greetd: no graphical leftovers.
+    if [[ "$GUI" == yes ]]; then
         run mkdir -p "$M/etc/X11/xorg.conf.d"
     fi
     if [[ "$GREETER" == greetd ]]; then
@@ -2361,7 +2371,7 @@ ensure_target_mount() {
     fi
     if ! findmnt "$M" >/dev/null; then
         HELP_FN=help_identity; HELP_SHOWN=""
-        ask_secret LUKS_PASS "Frase LUKS para abrir $R"
+        ask_secret LUKS_PASS "LUKS passphrase to open $R"
         local pf="$SCRATCH_DIR_REAL/luks.pass"
         luks_pass_file "$pf"
         cryptsetup open --key-file - "$R" cryptroot < "$pf"
@@ -2373,19 +2383,19 @@ ensure_target_mount() {
 
 ensure_resume_mounts() {
     if (( LAST_STAGE >= 15 )); then
-        log "Reanudación: etapa final ya completada; no se remonta"
+        log "Resume: final stage already completed; not remounting"
         return 0
     fi
     if (( LAST_STAGE >= 3 )); then ensure_target_mount; fi
     if (( LAST_STAGE >= 4 )); then ensure_chroot_mounts; fi
 }
 
-# ---------------------------- etapas ----------------------------
+# ---------------------------- stages ----------------------------
 
 stage_1_prepare() {
-    log "=== Etapa 1: preparación y respaldo en RAM ==="
+    log "=== Stage 1: preparation and RAM backup ==="
     run mkdir -p "$M" "$ARTIFACT_DIR" "$STATE_DIR"
-    if [[ "$MAKE_HOST_BACKUP" == si ]]; then
+    if [[ "$MAKE_HOST_BACKUP" == yes ]]; then
         run dd if="$U" of="$ARTIFACT_DIR/disk-first-16MiB.img" bs=1M count=16 status=progress
         if (( ! DRY_RUN && ! SIMULATE )); then
             sfdisk --dump "$U" > "$ARTIFACT_DIR/partitions-before.txt" 2>/dev/null || true
@@ -2399,47 +2409,47 @@ stage_1_prepare() {
     mark_stage 1
 }
 
-# Limpia firmas de filesystem residuales al INICIO de una particion.
-# sgdisk --zap-all borra la tabla GPT pero NO los datos: al reutilizar la
-# USB, la nueva ef02 (LBA 2048) conserva el boot sector anterior y Limine
-# 12.9.6 se niega a instalar el stage 2 (validate_or_force en limine.c).
-# 4096 bytes cubren los offsets +3, +54, +82 y +1080 que inspecciona.
+# Cleans residual filesystem signatures at the START of a partition.
+# sgdisk --zap-all erases the GPT table but NOT the data: when reusing
+# the USB, the new ef02 (LBA 2048) keeps the previous boot sector and
+# Limine 12.9.6 refuses to install stage 2 (validate_or_force in limine.c).
+# 4096 bytes cover the offsets +3, +54, +82 and +1080 that it inspects.
 clean_partition_start() {
     local p="$1"
-    log "=== Limpiando los primeros 4096 bytes de $p (firmas residuales) ==="
+    log "=== Cleaning the first 4096 bytes of $p (residual signatures) ==="
     if (( ! DRY_RUN && ! SIMULATE )); then
-        test -b "$p" || die "No existe $p; no se pueden limpiar firmas"
+        test -b "$p" || die "$p does not exist; signatures cannot be cleaned"
     fi
-    # Escritura ALINEADA de 4096 bytes: cubre +3, +54, +82 y +1080 de
-    # validate_or_force() de Limine. No se usa wipefs aqui: sus escrituras
-    # sub-sector (5 bytes en +82) son innecesarias y, con QEMU cache=none
-    # sobre un dispositivo de bloque del anfitrion, pueden fallar con E/S.
+    # ALIGNED 4096-byte write: covers +3, +54, +82 and +1080 of Limine's
+    # validate_or_force(). wipefs is not used here: its sub-sector writes
+    # (5 bytes at +82) are unnecessary and, with QEMU cache=none over a
+    # host block device, can fail with I/O errors.
     run dd if=/dev/zero of="$p" bs=4096 count=1 conv=notrunc status=none
     if (( ! DRY_RUN && ! SIMULATE )); then
-        # cmp consume toda la entrada: no hay EPIPE ni falso negativo.
+        # cmp consumes the whole input: no EPIPE and no false negative.
         if ! dd if="$p" bs=4096 count=1 status=none | cmp -n 4096 -s - /dev/zero; then
-            die "Los primeros 4096 bytes de $p no quedaron a cero; abortando antes de instalar Limine"
+            die "The first 4096 bytes of $p are not zero; aborting before installing Limine"
         fi
     fi
-    log "Primeros 4096 bytes a cero y verificados en $p"
+    log "First 4096 bytes zeroed and verified on $p"
 }
 
 stage_2_partition() {
-    log "=== Etapa 2: particionado DESTRUCTIVO ==="
+    log "=== Stage 2: DESTRUCTIVE partitioning ==="
     run sgdisk --zap-all "$U"
     run sgdisk -n "1:1M:+${BIOS_SIZE}" -t 1:ef02 -c 1:BIOSBOOT "$U"
     run sgdisk -n "2:0:+${ESP_SIZE}" -t 2:ef00 -c 2:ESPBOOT "$U"
     run sgdisk -n 3:0:0 -t 3:8309 -c 3:LUKSROOT "$U"
     run partprobe "$U"
     run udevadm settle
-    # sgdisk --zap-all NO borra datos: limpiar SOLO el inicio de la BIOS
-    # Boot (ef02), que es lo unico que inspecciona Limine. /boot y LUKS
-    # se reescriben en la etapa 3 con mkfs.fat y luksFormat, asi que no
-    # hace falta tocar $B ni $R aqui.
+    # sgdisk --zap-all does NOT erase data: clean ONLY the start of the
+    # BIOS Boot (ef02), which is the only thing Limine inspects. /boot
+    # and LUKS are rewritten in stage 3 with mkfs.fat and luksFormat,
+    # so there is no need to touch $B or $R here.
     clean_partition_start "$BIOSP"
     if (( ! DRY_RUN && ! SIMULATE )); then
-        test -b "$B" || die "No existe $B"
-        test -b "$R" || die "No existe $R"
+        test -b "$B" || die "$B does not exist"
+        test -b "$R" || die "$R does not exist"
         sgdisk -v "$U"
     fi
     mark_stage 2
@@ -2454,19 +2464,18 @@ luks_pass_file() {
 }
 
 stage_3_luks_mount() {
-    log "=== Etapa 3: LUKS y montaje ==="
-    # Sonda de escritura CON FLUSH sobre la ESP antes de formatear. Si
-    # el anfitrión/QEMU rechaza las escrituras dentro de /dev/sda2
-    # (p. ej. el anfitrion con el volumen FAT32 viejo montado: critical
-    # target error ya en el sector 18432), esto lo detecta al momento
-    # y con un mensaje explicable, en vez de dejar que mkfs.fat muera
-    # entre líneas de kernel. Escribir ceros aquí es seguro: la ESP
-    # se formatea justo después.
+    log "=== Stage 3: LUKS and mount ==="
+    # Write probe WITH FLUSH on the ESP before formatting. If the
+    # host/QEMU rejects writes inside /dev/sda2 (e.g. the host with the
+    # old FAT32 volume mounted: critical target error already at sector
+    # 18432), this detects it right away with an explainable message,
+    # instead of letting mkfs.fat die between kernel lines. Writing
+    # zeros here is safe: the ESP is formatted right afterwards.
     if ! run dd if=/dev/zero of="$B" bs=1M count=1 conv=fsync status=none; then
-        die "El anfitrión está rechazando escrituras dentro de $B (sonda con flush). Causa probable: el anfitrion tiene montado el volumen FAT32 viejo. Una unidad USB extraible NO admite 'offline' en el anfitrion: apaga la VM, quita la letra de unidad de TODAS las particiones de ese disco, cierra el Explorador y empieza de cero. Si aun así falla, no reinicies: ejecuta 'dmesg | grep -i sense | tail' en el live y guarda la Sense Key (Data Protect = protección/montado; Medium Error = memoria USB muriendo)"
+        die "The host is rejecting writes inside $B (flush probe). Probable cause: the host has the old FAT32 volume mounted. A removable USB drive does NOT support 'offline' on the host: shut down the VM, remove the drive letter from ALL partitions of that disk, close Explorer and start over. If it still fails, do not reboot: run 'dmesg | grep -i sense | tail' in the live session and keep the Sense Key (Data Protect = protected/mounted; Medium Error = dying USB media)"
     fi
     if ! run mkfs.fat -F32 -n "$BOOT_LABEL" "$B"; then
-        die "mkfs.fat no pudo escribir en $B: el anfitrión/QEMU está rechazando escrituras (critical target error). Revisa que ninguna particion de ese disco tenga letra de unidad en el anfitrion y lee la Sense Key con 'dmesg | grep -i sense | tail' antes de reiniciar"
+        die "mkfs.fat could not write to $B: the host/QEMU is rejecting writes (critical target error). Check that no partition of that disk has a drive letter on the host and read the Sense Key with 'dmesg | grep -i sense | tail' before rebooting"
     fi
     local pf="$SCRATCH_DIR_REAL/luks.pass"
     if (( ! DRY_RUN && ! SIMULATE )); then luks_pass_file "$pf"; fi
@@ -2502,10 +2511,10 @@ stage_3_luks_mount() {
     if (( ! DRY_RUN && ! SIMULATE )); then
         local uuid
         for uuid in "$LUKS_UUID" "$ROOT_UUID" "$BOOT_UUID"; do
-            [[ "$uuid" =~ ^[A-Fa-f0-9-]{8,}$ ]] || die "UUID inesperado: $uuid"
+            [[ "$uuid" =~ ^[A-Fa-f0-9-]{8,}$ ]] || die "Unexpected UUID: $uuid"
         done
     fi
-    if (( ! DRY_RUN && ! SIMULATE )) && [[ "$MAKE_HOST_BACKUP" == si ]]; then
+    if (( ! DRY_RUN && ! SIMULATE )) && [[ "$MAKE_HOST_BACKUP" == yes ]]; then
         cryptsetup luksHeaderBackup "$R" --header-backup-file "$ARTIFACT_DIR/luks-header.img"
         chmod 600 "$ARTIFACT_DIR/luks-header.img"
         printf '%s\n' "LUKS_UUID=$LUKS_UUID" "ROOT_UUID=$ROOT_UUID" "BOOT_UUID=$BOOT_UUID" > "$ARTIFACT_DIR/uuids.txt"
@@ -2515,7 +2524,7 @@ stage_3_luks_mount() {
 }
 
 stage_4_debootstrap() {
-    log "=== Etapa 4: debootstrap ==="
+    log "=== Stage 4: debootstrap ==="
     run debootstrap --arch="$ARCH" --variant=minbase --components="$COMPONENTS" --keyring=/usr/share/keyrings/debian-archive-keyring.gpg --force-check-sig "$SUITE" "$M" "$MIRROR"
     ensure_target_dirs
     ensure_chroot_mounts
@@ -2523,9 +2532,9 @@ stage_4_debootstrap() {
 }
 
 stage_5_sources() {
-    log "=== Etapa 5: sources deb822 ==="
+    log "=== Stage 5: deb822 sources ==="
     ensure_chroot_mounts
-    # debootstrap --components usa COMAS; deb822 Components: usa ESPACIOS.
+    # debootstrap --components uses COMMAS; deb822 Components: uses SPACES.
     local components_deb822="${COMPONENTS//,/ }"
     write_lines "$M/etc/apt/sources.list.d/debian.sources" \
         "Types: deb" \
@@ -2539,20 +2548,20 @@ stage_5_sources() {
         "Suites: trixie-security" \
         "Components: $components_deb822" \
         "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"
-    # debootstrap deja /etc/apt/sources.list con una linea equivalente a
-    # "deb ... trixie main contrib non-free-firmware". Si se conserva, APT
-    # veria trixie duplicado. El deb822 de arriba es el autoritativo.
+    # debootstrap leaves /etc/apt/sources.list with a line equivalent to
+    # "deb ... trixie main contrib non-free-firmware". If kept, APT would
+    # see trixie duplicated. The deb822 above is the authoritative one.
     run rm -f "$M/etc/apt/sources.list"
     run chroot "$M" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
     mark_stage 5
 }
 
 build_packages() {
-    # REGLA DURA: ningún paquete X11 puede estar en la lista base.
-    # x11-xkb-utils depende de libx11-6/libxaw7/libxrandr2/libxt6t64
-    # y x11-xserver-utils de otras bibliotecas X11: antes estaban
-    # aquí sin condición y por eso GUI=no instalaba X11 igualmente.
-    # Todo lo gráfico vive SOLO dentro del bloque GUI=si de abajo.
+    # HARD RULE: no X11 package may be in the base list.
+    # x11-xkb-utils depends on libx11-6/libxaw7/libxrandr2/libxt6t64 and
+    # x11-xserver-utils on other X11 libraries: they used to be here
+    # unconditionally and that is why GUI=no installed X11 anyway.
+    # Everything graphical lives ONLY inside the GUI=yes block below.
     PKGS=(
         apt debian-archive-keyring ca-certificates systemd-sysv locales tzdata
         keyboard-configuration console-setup sudo coreutils util-linux
@@ -2564,11 +2573,11 @@ build_packages() {
     [[ "$USER_SHELL" == /bin/zsh ]] && PKGS+=(zsh)
     [[ "$ROOT_FS" == btrfs ]] && PKGS+=(btrfs-progs)
     case "$FIRMWARE" in
-        completo) PKGS+=(firmware-linux-free firmware-amd-graphics firmware-intel-graphics firmware-nvidia-graphics firmware-misc-nonfree firmware-realtek firmware-iwlwifi firmware-atheros firmware-brcm80211 firmware-mediatek) ;;
-        minimo) PKGS+=(firmware-linux-free firmware-realtek firmware-iwlwifi firmware-misc-nonfree) ;;
+        full) PKGS+=(firmware-linux-free firmware-amd-graphics firmware-intel-graphics firmware-nvidia-graphics firmware-misc-nonfree firmware-realtek firmware-iwlwifi firmware-atheros firmware-brcm80211 firmware-mediatek) ;;
+        minimal) PKGS+=(firmware-linux-free firmware-realtek firmware-iwlwifi firmware-misc-nonfree) ;;
     esac
     case "$MICROCODE" in
-        ambos) PKGS+=(intel-microcode amd64-microcode) ;;
+        both) PKGS+=(intel-microcode amd64-microcode) ;;
         intel) PKGS+=(intel-microcode) ;;
         amd) PKGS+=(amd64-microcode) ;;
     esac
@@ -2580,28 +2589,28 @@ build_packages() {
         NetworkManager) PKGS+=(network-manager wpasupplicant iw) ;;
         dhcpcd) PKGS+=(dhcpcd-base wpasupplicant iw) ;;
     esac
-    [[ "$FIREWALL" == si ]] && PKGS+=(nftables)
-    [[ "$APPARMOR" == si ]] && PKGS+=(apparmor)
-    [[ "$DOAS" == si ]] && PKGS+=(opendoas)
-    [[ "$AUDITD" == si ]] && PKGS+=(auditd)
-    [[ "$SSH" == si ]] && PKGS+=(openssh-server)
+    [[ "$FIREWALL" == yes ]] && PKGS+=(nftables)
+    [[ "$APPARMOR" == yes ]] && PKGS+=(apparmor)
+    [[ "$DOAS" == yes ]] && PKGS+=(opendoas)
+    [[ "$AUDITD" == yes ]] && PKGS+=(auditd)
+    [[ "$SSH" == yes ]] && PKGS+=(openssh-server)
     [[ "$GREETER" == greetd ]] && PKGS+=(greetd tuigreet)
     [[ "$GREETER" == ly ]] && PKGS+=(libpam0g libxcb1 libxcb-xkb1 libaudit1 brightnessctl)
-    if [[ "$GUI" == si ]]; then
+    if [[ "$GUI" == yes ]]; then
         PKGS+=(xserver-xorg-core xserver-xorg-input-all xserver-xorg-video-all xauth xinit x11-xkb-utils x11-xserver-utils libgl1-mesa-dri mesa-utils "$FONT_PKG")
         [[ "$WM" == openbox ]] && PKGS+=(openbox)
         [[ "$COMPOSITOR" == picom ]] && PKGS+=(picom)
         [[ "$BAR" == tint2 ]] && PKGS+=(tint2)
         [[ "$LAUNCHER" == rofi ]] && PKGS+=(rofi)
-        case "$TERMINAL" in xterm|ambas) PKGS+=(xterm) ;; esac
-        case "$TERMINAL" in alacritty|ambas) PKGS+=(alacritty) ;; esac
+        case "$TERMINAL" in xterm|both) PKGS+=(xterm) ;; esac
+        case "$TERMINAL" in alacritty|both) PKGS+=(alacritty) ;; esac
         PKGS+=(feh)
     fi
     PKGS+=("${EXTRA_PACKAGES[@]}")
 }
 
 stage_6_packages() {
-    log "=== Etapa 6: paquetes ==="
+    log "=== Stage 6: packages ==="
     ensure_chroot_mounts
     ensure_target_dirs
     write_lines "$M/etc/kernel-img.conf" 'do_symlinks = No'
@@ -2609,16 +2618,16 @@ stage_6_packages() {
         'MODULES=most' 'BUSYBOX=y' 'KEYMAP=y' 'RESUME=none' 'UMASK=0077'
     build_packages
     if [[ "$GUI" == no ]]; then
-        log "GUI=no confirmado: sin Xorg, sin paquetes x11-*, sin Openbox ni terminales gráficas"
+        log "GUI=no confirmed: no Xorg, no x11-* packages, no Openbox or graphical terminals"
     fi
-    log "Paquetes seleccionados: ${PKGS[*]}"
+    log "Selected packages: ${PKGS[*]}"
     run chroot "$M" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get -s install --no-install-recommends "${PKGS[@]}"
     run chroot "$M" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${PKGS[@]}"
     run chroot "$M" apt-get clean
     # shellcheck disable=SC2016
     capture K bash -c 'basename "$(find "$1/boot" -maxdepth 1 -name "vmlinuz-*" | sort | tail -n 1)" | sed "s/^vmlinuz-//"' sh "$M"
-    [[ -n "$K" ]] || die "No se pudo determinar versión del kernel"
-    [[ "$K" =~ ^[A-Za-z0-9._+-]+$ ]] || die "ABI de kernel inválido: $K"
+    [[ -n "$K" ]] || die "Could not determine the kernel version"
+    [[ "$K" =~ ^[A-Za-z0-9._+-]+$ ]] || die "invalid kernel ABI: $K"
     log "Kernel ABI: $K"
     mark_stage 6
 }
@@ -2626,7 +2635,7 @@ stage_6_packages() {
 set_chpasswd() {
     local user="$1" pass="$2" f="$SCRATCH_DIR_REAL/chpasswd.$$" old
     if (( DRY_RUN || SIMULATE )); then
-        log "+ chpasswd para $user (oculto)"
+        log "+ chpasswd for $user (hidden)"
         return 0
     fi
     old="$(umask)"
@@ -2638,7 +2647,7 @@ set_chpasswd() {
 }
 
 stage_7_system_config() {
-    log "=== Etapa 7: sistema base ==="
+    log "=== Stage 7: base system ==="
     ensure_chroot_mounts
     write_lines "$M/etc/locale.gen" "$LOCALE UTF-8"
     run chroot "$M" /usr/sbin/locale-gen
@@ -2653,13 +2662,13 @@ stage_7_system_config() {
         'FONTFACE="Terminus"' 'FONTSIZE="8x16"' 'VIDEOMODE=""'
     run chroot "$M" /usr/bin/setupcon --save-only
     ensure_target_dirs
-    if [[ "$GUI" == si ]]; then
+    if [[ "$GUI" == yes ]]; then
         write_lines "$M/etc/X11/xorg.conf.d/00-keyboard.conf" \
             'Section "InputClass"' '    Identifier "system-keyboard"' \
             '    MatchIsKeyboard "on"' '    Option "XkbModel" "pc105"' \
             "    Option \"XkbLayout\" \"$KEYMAP\"" 'EndSection'
     else
-        log "GUI=no: no se crea /etc/X11 en el sistema instalado"
+        log "GUI=no: /etc/X11 is not created in the installed system"
     fi
     write_lines "$M/etc/hostname" "$HOSTNAME_DEB"
     write_lines "$M/etc/hosts" \
@@ -2673,7 +2682,7 @@ stage_7_system_config() {
 }
 
 stage_8_crypt_fstab() {
-    log "=== Etapa 8: crypttab/fstab/initramfs ==="
+    log "=== Stage 8: crypttab/fstab/initramfs ==="
     ensure_chroot_mounts
     local root_opts="rw,noatime,errors=remount-ro"
     [[ "$ROOT_FS" == btrfs ]] && root_opts="rw,noatime,compress=zstd:1"
@@ -2688,60 +2697,60 @@ stage_8_crypt_fstab() {
 kernel_cmdline() {
     local base="root=/dev/mapper/cryptroot rootfstype=$ROOT_FS ro" hard=""
     case "$KERNEL_HARDENING" in
-        conservador) hard="slab_nomerge init_on_alloc=1 init_on_free=1 page_alloc.shuffle=1 randomize_kstack_offset=1 pti=on debugfs=off" ;;
-        agresivo) hard="slab_nomerge init_on_alloc=1 init_on_free=1 page_alloc.shuffle=1 randomize_kstack_offset=1 pti=on debugfs=off vsyscall=none mitigations=auto,nosmt" ;;
-        ninguno) hard="" ;;
+        conservative) hard="slab_nomerge init_on_alloc=1 init_on_free=1 page_alloc.shuffle=1 randomize_kstack_offset=1 pti=on debugfs=off" ;;
+        aggressive) hard="slab_nomerge init_on_alloc=1 init_on_free=1 page_alloc.shuffle=1 randomize_kstack_offset=1 pti=on debugfs=off vsyscall=none mitigations=auto,nosmt" ;;
+        none) hard="" ;;
     esac
-    if [[ "$PLYMOUTH_THEME" == ninguno ]]; then
+    if [[ "$PLYMOUTH_THEME" == none ]]; then
         printf '%s %s\n' "$base" "$hard"
     else
         printf '%s quiet splash %s\n' "$base" "$hard"
     fi
 }
 
-# Actualización AUTOMÁTICA de limine.conf cuando cambia el kernel.
-# Debian ejecuta los hooks de /etc/kernel/postinst.d y postrm.d con
-# run-parts, con $1=ABI del kernel y $2=ruta de la imagen; los hooks de
-# bootloader deben llamarse zz-* para ejecutarse AL FINAL, y los de
-# /etc/initramfs/post-update.d se llaman tras crear/actualizar/borrar
-# un initramfs (Debian Kernel Handbook, cap. 8). El hook NO confía en
-# $1: recalcula el último par vmlinuz-*/initrd.img-* PRESENTE, así
-# también cubre el borrado de un kernel viejo (postrm). Si /boot no
-# está montado o no hay un par válido, avisa por stderr y sale 0 para
-# no romper la transacción de apt. /boot es FAT32, que no admite
-# symlinks útiles para Limine: por eso se reescriben las rutas
-# versionadas en vez de enlazar vmlinuz/initrd.img sin versión.
+# AUTOMATIC update of limine.conf when the kernel changes.
+# Debian runs the /etc/kernel/postinst.d and postrm.d hooks with
+# run-parts, with $1=kernel ABI and $2=image path; bootloader hooks
+# must be named zz-* to run LAST, and those in
+# /etc/initramfs/post-update.d are called after creating/updating/removing
+# an initramfs (Debian Kernel Handbook, ch. 8). The hook does NOT trust
+# $1: it recomputes the newest vmlinuz-*/initrd.img-* pair PRESENT, so
+# it also covers the removal of an old kernel (postrm). If /boot is not
+# mounted or there is no valid pair, it warns on stderr and exits 0 so
+# as not to break the apt transaction. /boot is FAT32, which does not
+# support symlinks useful to Limine: that is why the versioned paths
+# are rewritten instead of linking unversioned vmlinuz/initrd.img.
 # shellcheck disable=SC2016
 install_limine_auto_hook() {
     local hook="$M/etc/kernel/postinst.d/zz-limine-update"
     run mkdir -p "$M/etc/kernel/postinst.d" "$M/etc/kernel/postrm.d" "$M/etc/initramfs/post-update.d"
     write_lines "$hook" \
         '#!/bin/sh' \
-        '# zz-limine-update: apunta limine.conf al ultimo kernel presente.' \
-        '# Lo ejecutan los hooks de kernel/initramfs de Debian (zz- = al final).' \
-        '# Si no hay par vmlinuz/initrd valido, avisa y sale 0: nunca rompe apt.' \
+        '# zz-limine-update: points limine.conf at the newest kernel present.' \
+        '# Run by the Debian kernel/initramfs hooks (zz- = last).' \
+        '# If there is no valid vmlinuz/initrd pair, it warns and exits 0: never breaks apt.' \
         'set -u' \
         'CONF=/boot/limine.conf' \
         'EFI_CONF=/boot/EFI/BOOT/limine.conf' \
-        'if [ ! -f "$CONF" ]; then echo "zz-limine-update: no existe $CONF; se omite" >&2; exit 0; fi' \
+        'if [ ! -f "$CONF" ]; then echo "zz-limine-update: $CONF does not exist; skipping" >&2; exit 0; fi' \
         'latest=$(for f in /boot/vmlinuz-*; do [ -f "$f" ] || continue; v=${f#/boot/vmlinuz-}; if [ -f "/boot/initrd.img-$v" ]; then echo "$v"; fi; done | sort -V | tail -n 1)' \
-        'if [ -z "$latest" ]; then echo "zz-limine-update: no hay par vmlinuz/initrd en /boot; se omite" >&2; exit 0; fi' \
+        'if [ -z "$latest" ]; then echo "zz-limine-update: no vmlinuz/initrd pair in /boot; skipping" >&2; exit 0; fi' \
         'tmp="/boot/.limine.conf.tmp.$$"' \
-        'if ! sed -E "s/vmlinuz-[^[:space:]]+/vmlinuz-$latest/g; s/initrd\.img-[^[:space:]]+/initrd.img-$latest/g" "$CONF" > "$tmp"; then echo "zz-limine-update: sed fallo; no se toca limine.conf" >&2; rm -f "$tmp"; exit 0; fi' \
+        'if ! sed -E "s/vmlinuz-[^[:space:]]+/vmlinuz-$latest/g; s/initrd\.img-[^[:space:]]+/initrd.img-$latest/g" "$CONF" > "$tmp"; then echo "zz-limine-update: sed failed; limine.conf untouched" >&2; rm -f "$tmp"; exit 0; fi' \
         'cat "$tmp" > "$CONF"' \
         'rm -f "$tmp"' \
         'mkdir -p /boot/EFI/BOOT' \
         'cat "$CONF" > "$EFI_CONF"' \
-        'echo "zz-limine-update: limine.conf apunta al kernel $latest" >&2' \
+        'echo "zz-limine-update: limine.conf points at kernel $latest" >&2' \
         'exit 0'
     run cp "$hook" "$M/etc/kernel/postrm.d/zz-limine-update"
     run cp "$hook" "$M/etc/initramfs/post-update.d/zz-limine-update"
     run chmod 0755 "$hook" "$M/etc/kernel/postrm.d/zz-limine-update" "$M/etc/initramfs/post-update.d/zz-limine-update"
-    log "Limine automático: hook zz-limine-update instalado en kernel/postinst.d, kernel/postrm.d e initramfs/post-update.d"
+    log "Automatic Limine: zz-limine-update hook installed in kernel/postinst.d, kernel/postrm.d and initramfs/post-update.d"
 }
 
 stage_9_limine() {
-    log "=== Etapa 9: Limine upstream ==="
+    log "=== Stage 9: Limine upstream ==="
     ensure_chroot_mounts
     ensure_target_dirs
     local work="$SCRATCH_DIR_REAL/limine-upstream"
@@ -2749,23 +2758,23 @@ stage_9_limine() {
     run curl -fL --retry "$CURL_RETRIES" --retry-delay 2 --connect-timeout "$NETWORK_TIMEOUT" --max-time "$((NETWORK_TIMEOUT * 30))" -o "$work/limine-binary.tar.xz" "https://github.com/Limine-Bootloader/Limine/releases/download/v${LIMINE_VER}/limine-binary.tar.xz"
     run curl -fL --retry "$CURL_RETRIES" --retry-delay 2 --connect-timeout "$NETWORK_TIMEOUT" --max-time "$((NETWORK_TIMEOUT * 30))" -o "$work/limine-binary.tar.xz.sig" "https://github.com/Limine-Bootloader/Limine/releases/download/v${LIMINE_VER}/limine-binary.tar.xz.sig"
     verify_sha "$LIMINE_SHA" "$work/limine-binary.tar.xz"
-    if [[ "$VERIFY_GPG" == si ]]; then
+    if [[ "$VERIFY_GPG" == yes ]]; then
         run mkdir -m 0700 -p "$work/gnupg"
         run gpg --homedir "$work/gnupg" --batch --keyserver hkps://keyserver.ubuntu.com --recv-keys "$LIMINE_KEY"
         run gpg --homedir "$work/gnupg" --batch --verify "$work/limine-binary.tar.xz.sig" "$work/limine-binary.tar.xz"
     else
-        log "ADVERTENCIA: firma GPG de Limine omitida; solo se verifica SHA-256"
+        log "WARNING: Limine GPG signature skipped; only SHA-256 is verified"
     fi
     run tar -xJf "$work/limine-binary.tar.xz" -C "$work"
     run make -C "$work/limine-binary" limine
-    [[ "$UEFI" == si ]] && run install -m 0644 "$work/limine-binary/BOOTX64.EFI" "$M/boot/EFI/BOOT/BOOTX64.EFI"
-    [[ "$UEFI_IA32" == si ]] && run install -m 0644 "$work/limine-binary/BOOTIA32.EFI" "$M/boot/EFI/BOOT/BOOTIA32.EFI"
-    [[ "$BIOS_BOOT" == si ]] && run install -m 0644 "$work/limine-binary/limine-bios.sys" "$M/boot/limine-bios.sys"
+    [[ "$UEFI" == yes ]] && run install -m 0644 "$work/limine-binary/BOOTX64.EFI" "$M/boot/EFI/BOOT/BOOTX64.EFI"
+    [[ "$UEFI_IA32" == yes ]] && run install -m 0644 "$work/limine-binary/BOOTIA32.EFI" "$M/boot/EFI/BOOT/BOOTIA32.EFI"
+    [[ "$BIOS_BOOT" == yes ]] && run install -m 0644 "$work/limine-binary/limine-bios.sys" "$M/boot/limine-bios.sys"
 
     local cmdline fallback_cmd editor="no"
     cmdline="$(kernel_cmdline)"
     fallback_cmd="root=/dev/mapper/cryptroot rootfstype=$ROOT_FS ro plymouth.enable=0"
-    [[ "$LIMINE_EDITOR" == si ]] && editor="yes"
+    [[ "$LIMINE_EDITOR" == yes ]] && editor="yes"
     write_lines "$M/boot/limine.conf" \
         'timeout: 5' 'default_entry: 1' "editor_enabled: $editor" \
         'interface_branding: DEBIAN MINIMAL' \
@@ -2775,32 +2784,32 @@ stage_9_limine() {
         '/Debian 13 trixie (Plymouth)' '    protocol: linux' \
         "    path: boot():/vmlinuz-$K" "    cmdline: $cmdline" \
         "    module_path: boot():/initrd.img-$K"
-    if [[ "$PLYMOUTH_FALLBACK" == si ]]; then
+    if [[ "$PLYMOUTH_FALLBACK" == yes ]]; then
         write_line "$M/boot/limine.conf" ''
-        write_line "$M/boot/limine.conf" '/Debian 13 trixie (texto)'
+        write_line "$M/boot/limine.conf" '/Debian 13 trixie (text)'
         write_line "$M/boot/limine.conf" '    protocol: linux'
         write_line "$M/boot/limine.conf" "    path: boot():/vmlinuz-$K"
         write_line "$M/boot/limine.conf" "    cmdline: $fallback_cmd"
         write_line "$M/boot/limine.conf" "    module_path: boot():/initrd.img-$K"
     fi
     write_line "$M/boot/limine.conf" ''
-    write_line "$M/boot/limine.conf" '/Rescate initramfs'
+    write_line "$M/boot/limine.conf" '/Initramfs rescue'
     write_line "$M/boot/limine.conf" '    protocol: linux'
     write_line "$M/boot/limine.conf" "    path: boot():/vmlinuz-$K"
     write_line "$M/boot/limine.conf" "    cmdline: root=/dev/mapper/cryptroot rootfstype=$ROOT_FS ro plymouth.enable=0 break=premount"
     write_line "$M/boot/limine.conf" "    module_path: boot():/initrd.img-$K"
-    # CONFIG.md: en UEFI el primer candidato es <EFI app path>/limine.conf,
-    # es decir /EFI/BOOT/limine.conf. Dejar solo /limine.conf funciona, pero
-    # puede ser sombreado por otro candidato en otra partición.
+    # CONFIG.md: on UEFI the first candidate is <EFI app path>/limine.conf,
+    # i.e. /EFI/BOOT/limine.conf. Leaving only /limine.conf works, but it
+    # can be shadowed by another candidate on another partition.
     run mkdir -p "$M/boot/EFI/BOOT"
     run cp "$M/boot/limine.conf" "$M/boot/EFI/BOOT/limine.conf"
     install_limine_auto_hook
     run sync
-    if [[ "$BIOS_BOOT" == si ]]; then
-        # Otra vez aqui: con --resume la etapa 2 no se repite.
+    if [[ "$BIOS_BOOT" == yes ]]; then
+        # Once again here: with --resume stage 2 is not repeated.
         clean_partition_start "$BIOSP"
-        if [[ "$LIMINE_BIOS_FORCE" == si ]]; then
-            log "ADVERTENCIA: LIMINE_BIOS_FORCE=si; se anade --force a bios-install"
+        if [[ "$LIMINE_BIOS_FORCE" == yes ]]; then
+            log "WARNING: LIMINE_BIOS_FORCE=yes; adding --force to bios-install"
             run "$work/limine-binary/limine" bios-install "$U" 1 --force
         else
             run "$work/limine-binary/limine" bios-install "$U" 1
@@ -2810,22 +2819,22 @@ stage_9_limine() {
 }
 
 stage_10_plymouth() {
-    log "=== Etapa 10: Plymouth ==="
+    log "=== Stage 10: Plymouth ==="
     ensure_chroot_mounts
-    if [[ "$PLYMOUTH_THEME" != ninguno ]]; then
+    if [[ "$PLYMOUTH_THEME" != none ]]; then
         run chroot "$M" /usr/sbin/plymouth-set-default-theme -R "$PLYMOUTH_THEME"
         run chroot "$M" /usr/sbin/update-initramfs -u -k all
     else
-        log "Plymouth instalado pero sin splash en la entrada principal"
+        log "Plymouth installed but no splash in the main entry"
     fi
     mark_stage 10
 }
 
 stage_11_zram_audio() {
-    log "=== Etapa 11: ZRAM y PipeWire ==="
+    log "=== Stage 11: ZRAM and PipeWire ==="
     ensure_chroot_mounts
     ensure_target_dirs
-    if [[ "$ZRAM" == si ]]; then
+    if [[ "$ZRAM" == yes ]]; then
         write_lines "$M/etc/systemd/zram-generator.conf" \
             '[zram0]' "zram-size = min(ram / 2, $ZRAM_SIZE)" 'swap-priority = 100'
     else
@@ -2836,17 +2845,17 @@ stage_11_zram_audio() {
 
 ensure_zig_resolv_conf() {
     if (( DRY_RUN || SIMULATE )); then
-        log "+ comprobar salto de línea final de /etc/resolv.conf del live para Zig ${ZIG_VER}"
+        log "+ check the trailing newline of the live /etc/resolv.conf for Zig ${ZIG_VER}"
         return 0
     fi
     if [[ -f /etc/resolv.conf ]] && [[ -n "$(tail -c 1 /etc/resolv.conf)" ]]; then
-        log "Añadiendo salto de línea final a /etc/resolv.conf del live (Zig ${ZIG_VER} lo exige)"
+        log "Adding a trailing newline to the live /etc/resolv.conf (Zig ${ZIG_VER} requires it)"
         printf '\n' >> /etc/resolv.conf
     fi
 }
 
 stage_12_greeter() {
-    log "=== Etapa 12: greeter ==="
+    log "=== Stage 12: greeter ==="
     ensure_chroot_mounts
     ensure_target_dirs
     case "$GREETER" in
@@ -2864,13 +2873,13 @@ stage_12_greeter() {
             lysrc="$src/ly"
             cache="$src/zig-local-cache"
             gcache="$src/zig-global-cache"
-            log "Compilando Ly ${LY_VER} FUERA del target con Zig ${ZIG_VER}"
+            log "Compiling Ly ${LY_VER} OUTSIDE the target with Zig ${ZIG_VER}"
             run_in_dir "$lysrc" env ZIG_GLOBAL_CACHE_DIR="$gcache" ZIG_LOCAL_CACHE_DIR="$cache" "$zig" build --cache-dir "$cache" -Doptimize=ReleaseSafe
             run_in_dir "$lysrc" env ZIG_GLOBAL_CACHE_DIR="$gcache" ZIG_LOCAL_CACHE_DIR="$cache" "$zig" build installexe -Dinit_system=systemd -Ddest_directory="$M" -Doptimize=ReleaseSafe --cache-dir "$cache"
             run chroot "$M" /usr/bin/ly --validate-config /etc/ly/config.ini
             run systemctl --root="$M" disable getty@tty2.service
             run systemctl --root="$M" enable ly@tty2.service
-            log "Ly instalado; Zig, tarballs y cachés quedan solo en scratch y se borran al salir"
+            log "Ly installed; Zig, tarballs and caches stay only in scratch and are deleted on exit"
             ;;
         greetd)
             write_lines "$M/etc/greetd/config.toml" \
@@ -2880,17 +2889,17 @@ stage_12_greeter() {
             run systemctl --root="$M" enable greetd.service
             run systemctl --root="$M" disable getty@tty7.service
             ;;
-        consola)
-            log "Sin greeter gráfico; inicio de sesión por TTY"
+        console)
+            log "No graphical greeter; login via TTY"
             ;;
     esac
     mark_stage 12
 }
 
 stage_13_desktop() {
-    log "=== Etapa 13: escritorio ==="
-    if [[ "$GUI" != si ]]; then
-        log "GUI=no: etapa de escritorio omitida (sin X11)"
+    log "=== Stage 13: desktop ==="
+    if [[ "$GUI" != yes ]]; then
+        log "GUI=no: desktop stage skipped (no X11)"
         mark_stage 13
         return 0
     fi
@@ -2911,9 +2920,9 @@ stage_13_desktop() {
 }
 
 stage_14_security_network() {
-    log "=== Etapa 14: red y seguridad ==="
+    log "=== Stage 14: network and security ==="
     ensure_chroot_mounts
-    if [[ "$FIREWALL" == si ]]; then
+    if [[ "$FIREWALL" == yes ]]; then
         write_lines "$M/etc/nftables.conf" \
             'flush ruleset' '' 'table inet filter {' '    chain input {' \
             '        type filter hook input priority 0; policy drop;' \
@@ -2928,16 +2937,16 @@ stage_14_security_network() {
         run systemctl --root="$M" enable nftables.service
     fi
     [[ "$NETWORK" == NetworkManager ]] && run systemctl --root="$M" enable NetworkManager.service
-    [[ "$APPARMOR" == si ]] && run systemctl --root="$M" enable apparmor.service
-    [[ "$DOAS" == si ]] && write_lines "$M/etc/doas.conf" 'permit persist :sudo'
-    [[ "$SSH" == si ]] && run systemctl --root="$M" enable ssh.service
+    [[ "$APPARMOR" == yes ]] && run systemctl --root="$M" enable apparmor.service
+    [[ "$DOAS" == yes ]] && write_lines "$M/etc/doas.conf" 'permit persist :sudo'
+    [[ "$SSH" == yes ]] && run systemctl --root="$M" enable ssh.service
     mark_stage 14
 }
 
 stage_15_cleanup_finish() {
-    log "=== Etapa 15: limpieza y cierre ==="
+    log "=== Stage 15: cleanup and close ==="
     ensure_chroot_mounts
-    if [[ "$CLEAN_TRACES" == si ]]; then
+    if [[ "$CLEAN_TRACES" == yes ]]; then
         run rm -rf "$M/debootstrap"
         run rm -f "$M/var/log/bootstrap.log" "$M/var/log/debootstrap.log" "$M/root/.bash_history"
         run find "$M/var/cache/apt/archives" -maxdepth 1 -type f -name '*.deb' -delete
@@ -2945,7 +2954,7 @@ stage_15_cleanup_finish() {
         run find "$M/tmp" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
     fi
     run chroot "$M" /usr/bin/dpkg --get-selections '*'
-    if (( ! DRY_RUN && ! SIMULATE )) && [[ "$MAKE_HOST_BACKUP" == si ]]; then
+    if (( ! DRY_RUN && ! SIMULATE )) && [[ "$MAKE_HOST_BACKUP" == yes ]]; then
         sgdisk --backup="$ARTIFACT_DIR/gpt-final.bin" "$U"
         cp "$M/boot/limine.conf" "$ARTIFACT_DIR/limine.conf"
         cp "$M/etc/crypttab" "$ARTIFACT_DIR/crypttab"
@@ -2957,42 +2966,42 @@ stage_15_cleanup_finish() {
     MOUNTS=()
     run cryptsetup close cryptroot
     mark_stage 15
-    if [[ "$DATA_POLICY" == borrar ]] && (( ! DRY_RUN && ! SIMULATE )); then
+    if [[ "$DATA_POLICY" == delete ]] && (( ! DRY_RUN && ! SIMULATE )); then
         run rm -rf "$STATE_DIR" "$ARTIFACT_DIR"
-        log "Estado y respaldos borrados; --resume ya no funcionará"
+        log "State and backups deleted; --resume will no longer work"
     fi
-    log "=== Instalación terminada ==="
-    log "No se ha copiado este script, logs, tarballs, Zig ni cachés al sistema instalado."
+    log "=== Installation finished ==="
+    log "This script, logs, tarballs, Zig or caches have not been copied into the installed system."
 }
 
 final_summary() {
-    log "=== Resumen final ==="
-    if [[ "$DATA_POLICY" == borrar ]]; then
-        log "Estado y respaldos eliminados segun tu eleccion; --resume ya no funciona."
+    log "=== Final summary ==="
+    if [[ "$DATA_POLICY" == delete ]]; then
+        log "State and backups deleted as you chose; --resume no longer works."
     else
-        log "Directorio de estado y respaldos (RAM): $BASE_DIR"
+        log "State and backups directory (RAM): $BASE_DIR"
         log "Log: $LOG_FILE"
-        log "AVISO: todo lo anterior se PIERDE al apagar o reiniciar la VM."
-        log "Si quieres conservar la cabecera LUKS, copiala AHORA con curl/scp a otro servidor."
-        log "Archivo: $ARTIFACT_DIR/luks-header.img"
+        log "WARNING: all of the above is LOST when you power off or reboot the VM."
+        log "If you want to keep the LUKS header, copy it NOW with curl/scp to another server."
+        log "File: $ARTIFACT_DIR/luks-header.img"
     fi
-    log "Para probar el arranque, reinicia la VM desde /dev/sda sin el ISO."
-    log "Prueba primero UEFI y despues BIOS/Legacy; ambas rutas estan instaladas."
-    log "Si la pantalla se queda negra con Plymouth, elige la entrada 'texto' de Limine."
-    log "Kernel futuro: se actualiza SOLO (hook zz-limine-update en el sistema)."
-    log "--refresh-limine queda solo como rescate desde el live, no como rutina."
-    log "Tu configuracion de QEMU sigue siendo ajena a este script y no ha sido revisada."
+    log "To test booting, reboot the VM from /dev/sda without the ISO."
+    log "Test UEFI first and then BIOS/Legacy; both paths are installed."
+    log "If the screen stays black with Plymouth, choose the 'text' entry in Limine."
+    log "Future kernels: they update THEMSELVES (zz-limine-update hook in the system)."
+    log "--refresh-limine remains only as a rescue from the live session, not as a routine."
+    log "Your QEMU configuration is still external to this script and has not been reviewed."
 }
 
 # ---------------------------- refresh-limine ----------------------------
 
 refresh_limine() {
-    log "=== Modo --refresh-limine ==="
+    log "=== Mode --refresh-limine ==="
     require_root
     if [[ -r "$CONFIG_FILE" ]]; then
         load_config_from "$CONFIG_FILE"
     else
-        log "No hay configuración previa en RAM; se usarán valores por defecto y solo se corregirán las rutas"
+        log "No previous configuration in RAM; defaults will be used and only the paths will be fixed"
     fi
     validate_preferences
     install_host_deps
@@ -3007,12 +3016,12 @@ refresh_limine() {
         install_limine_auto_hook
         run umount -R "$M"
         run cryptsetup close cryptroot
-        log "limine.conf actualizado en simulación; este script no quedó en el sistema instalado"
+        log "limine.conf updated in simulation; this script was not left in the installed system"
         return 0
     fi
-    test -b "$R" || die "No existe $R"
+    test -b "$R" || die "$R does not exist"
     HELP_FN=help_identity; HELP_SHOWN=""
-    ask_secret LUKS_PASS "Frase LUKS para abrir la USB"
+    ask_secret LUKS_PASS "LUKS passphrase to open the USB"
     local pf="$SCRATCH_DIR_REAL/luks.pass"
     luks_pass_file "$pf"
     cryptsetup open --key-file - "$R" cryptroot < "$pf"
@@ -3021,7 +3030,7 @@ refresh_limine() {
     mount_track "$M/boot" "$B"
     # shellcheck disable=SC2016
     capture K bash -c 'basename "$(find "$1/boot" -maxdepth 1 -name "vmlinuz-*" | sort | tail -n 1)" | sed "s/^vmlinuz-//"' sh "$M"
-    [[ -n "$K" && "$K" =~ ^[A-Za-z0-9._+-]+$ ]] || die "ABI de kernel inválido: $K"
+    [[ -n "$K" && "$K" =~ ^[A-Za-z0-9._+-]+$ ]] || die "invalid kernel ABI: $K"
     sed -i -E "s#(path: boot\(\):/)vmlinuz-[^ ]+#\1vmlinuz-$K#; s#(module_path: boot\(\):/)initrd.img-[^ ]+#\1initrd.img-$K#" "$M/boot/limine.conf"
     cp "$M/boot/limine.conf" "$M/boot/EFI/BOOT/limine.conf"
     install_limine_auto_hook
@@ -3030,49 +3039,48 @@ refresh_limine() {
     umount -R "$M"
     MOUNTS=()
     cryptsetup close cryptroot
-    log "limine.conf actualizado; este script no quedó en el sistema instalado"
+    log "limine.conf updated; this script was not left in the installed system"
 }
 
 # ---------------------------- CLI ----------------------------
 
 usage() {
     cat <<'USO'
-Uso: install.sh [OPCIONES]
+Usage: install.sh [OPTIONS]
 
-  --explain               Imprime TODAS las explicaciones y sale. No toca nada.
+  --explain               Print ALL explanations and exit. Touches nothing.
                           Ideal: bash install.sh --explain | less
-  --validate              Autocomprobación estática; no pregunta, no cambia nada.
-  --dry-run               Muestra todas las órdenes; no ejecuta cambios.
-  --simulate              Con --dry-run: omite disco real, root y red.
+  --validate              Static self-check; no questions, no changes.
+  --dry-run               Show every command; executes no changes.
+  --simulate              With --dry-run: skips real disk, root and network.
   --yes, --accept-defaults
-                          Acepta valores por defecto; en modo real SIGUE pidiendo
-                          contraseñas y la confirmación literal de borrado.
-  --config ARCHIVO        Carga preferencias no secretas guardadas en RAM.
-  --resume                Continúa desde la última etapa guardada EN ESTA SESIÓN.
-  --refresh-limine        RESCATE manual: abre la USB, corrige rutas de kernel
-                          e instala el hook automático zz-limine-update.
-                          En una instalación v2.1.0+ NO hace falta tras
-                          actualizar el kernel: el hook lo hace solo.
-  --log ARCHIVO           Ruta del log (por defecto en artifacts/ de /tmp).
-  --version               Muestra versión.
-  -h, --help              Esta ayuda.
+                          Accept default values; in real mode it STILL asks
+                          for passwords and the literal wipe confirmation.
+  --config FILE           Load non-secret preferences saved in RAM.
+  --resume                Continue from the last saved stage IN THIS SESSION.
+  --refresh-limine        Manual RESCUE: opens the USB, fixes kernel paths
+                          and installs the automatic zz-limine-update hook.
+                          On a v2.1.0+ installation it is NOT needed after
+                          a kernel update: the hook does it on its own.
+  --log FILE              Log path (by default in artifacts/ under /tmp).
+  --version               Show version.
+  -h, --help              This help.
 
-En las preguntas normales escribe ? para volver a leer su explicación.
-En las de CONTRASEÑA, pulsa ENTER sin escribir nada (? puede ser tu clave).
-La longitud mínima se pregunta y por defecto es 1 (sin mínimo).
+At normal questions type ? to re-read their explanation.
+At PASSWORD questions, press ENTER without typing anything (? can be
+your password). The minimum length is asked and defaults to 1 (no minimum).
 
-Orden recomendado dentro del live:
-  1) Descarga este mismo archivo desde la URL "Raw" de tu repositorio
-     GitHub con curl o wget y guardalo como /tmp/install.sh
+Recommended order inside the live session:
+  1) Download this same file from the "Raw" URL of your GitHub
+     repository with curl or wget and save it as /tmp/install.sh
   2) bash /tmp/install.sh --explain | less
   3) bash /tmp/install.sh --validate
   4) bash /tmp/install.sh --dry-run --simulate --yes
   5) sudo bash /tmp/install.sh
-  6) si falla SIN reiniciar: sudo bash /tmp/install.sh --resume
+  6) if it fails WITHOUT rebooting: sudo bash /tmp/install.sh --resume
 
-Advertencia: no se puede garantizar "fallo cero". Todo el estado y los
-respaldos viven en /tmp (tmpfs/RAM) y se pierden al apagar la VM. No he
-ejecutado una instalación real completa con este script.
+Warning: "zero failure" cannot be guaranteed. All state and backups
+live in /tmp (tmpfs/RAM) and are lost when the VM is powered off.
 USO
 }
 
@@ -3087,27 +3095,27 @@ parse_args() {
             --resume) RESUME=1 ;;
             --refresh-limine) REFRESH_LIMINE=1 ;;
             --config)
-                [[ $# -ge 2 ]] || die "--config requiere un archivo"
+                [[ $# -ge 2 ]] || die "--config requires a file"
                 shift
                 INPUT_CONFIG="$1"
-                [[ "$INPUT_CONFIG" != -* ]] || die "--config no puede empezar por '-'"
+                [[ "$INPUT_CONFIG" != -* ]] || die "--config must not start with '-'"
                 ;;
             --log)
-                [[ $# -ge 2 ]] || die "--log requiere una ruta"
+                [[ $# -ge 2 ]] || die "--log requires a path"
                 shift
                 LOG_FILE="$1"
                 LOG_GIVEN=1
-                [[ "$LOG_FILE" == /tmp/* ]] || die "--log debe ser una ruta absoluta bajo /tmp (RAM) para no dejar rastros"
-                [[ "$LOG_FILE" != *..* ]] || die "--log no puede contener '..'"
+                [[ "$LOG_FILE" == /tmp/* ]] || die "--log must be an absolute path under /tmp (RAM) to leave no traces"
+                [[ "$LOG_FILE" != *..* ]] || die "--log must not contain '..'"
                 ;;
             --version) printf '%s %s\n' "$SCRIPT_NAME" "$SCRIPT_VERSION"; exit 0 ;;
             -h|--help) usage; exit 0 ;;
-            *) die "Opción desconocida: $1" ;;
+            *) die "Unknown option: $1" ;;
         esac
         shift
     done
-    if (( SIMULATE && ! DRY_RUN )); then die "--simulate requiere --dry-run"; fi
-    if (( RESUME && REFRESH_LIMINE )); then die "No combines --resume y --refresh-limine"; fi
+    if (( SIMULATE && ! DRY_RUN )); then die "--simulate requires --dry-run"; fi
+    if (( RESUME && REFRESH_LIMINE )); then die "Do not combine --resume and --refresh-limine"; fi
 }
 
 main() {
@@ -3124,7 +3132,7 @@ main() {
     if (( VALIDATE_ONLY )); then
         self_check
         bash -n "$0"
-        log "Validación OK; versión $SCRIPT_VERSION"
+        log "Validation OK; version $SCRIPT_VERSION"
         exit 0
     fi
     if (( REFRESH_LIMINE )); then
@@ -3135,17 +3143,17 @@ main() {
 
     ui_banner
     log "=== $SCRIPT_NAME $SCRIPT_VERSION ==="
-    log "Fecha: $(date -Is)"
-    if (( DRY_RUN )); then log "MODO SIMULACIÓN: no se ejecutará ninguna orden con efectos"; fi
+    log "Date: $(date -Is)"
+    if (( DRY_RUN )); then log "SIMULATION MODE: no command with effects will be executed"; fi
     self_check
 
     if (( RESUME )); then
-        [[ -r "$STATE_FILE" ]] || die "No existe estado para --resume: $STATE_FILE (se pierde al reiniciar la VM)"
-        [[ -r "$CONFIG_FILE" ]] || die "No existe configuración para --resume: $CONFIG_FILE"
+        [[ -r "$STATE_FILE" ]] || die "No state for --resume: $STATE_FILE (it is lost when the VM reboots)"
+        [[ -r "$CONFIG_FILE" ]] || die "No configuration for --resume: $CONFIG_FILE"
         read_state
         load_config_from "$CONFIG_FILE"
         [[ -n "$INPUT_CONFIG" ]] && load_config_from "$INPUT_CONFIG"
-        log "Reanudando desde etapa $((LAST_STAGE+1))"
+        log "Resuming from stage $((LAST_STAGE+1))"
         validate_preferences
         (( LAST_STAGE >= 3 )) && ALLOW_TARGET_MOUNTS=1
         preflight
