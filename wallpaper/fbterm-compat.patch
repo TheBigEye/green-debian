@@ -10,6 +10,14 @@ in FbShell::adjustCharAttr (VGA trick); with real bright
 backgrounds available that only corrupts colours - fastfetch's
 black colour square came out grey - so the patch removes it.
 
+With a background image, FbTerm paints every cell whose
+background equals color-background (0) by copying the image,
+so an explicit black background (SGR 40, 48;5;0) looked
+transparent. CharAttr now carries bg_set, set by every SGR
+background sequence and cleared by SGR 0/49, and the render
+code paints the colour instead of the image when it is set.
+Plain text keeps the transparent background.
+
 Changes:
   vterm_action.cpp  SGR extended colours; alternate screen
                     (47/1047 swap buffer, 1048 cursor, 1049 both;
@@ -18,18 +26,40 @@ Changes:
   vterm.cpp         OSC bytes swallowed until BEL/CAN/SUB/ST
                     (FbTerm palette OSC ] P / ] R still works);
                     no history saves from the alternate screen
-  vterm.h           ESosc state, OSC/alternate-screen members
-  fbshell.cpp       blink no longer brightens the background
+  vterm.h           ESosc state, OSC/alternate-screen members,
+                    CharAttr bg_set flag
+  fbshell.cpp       blink no longer brightens the background;
+                    passes bg_set to the screen
+  screen.h/.cpp,    bg_set threaded through text drawing;
+  screen_render.cpp explicit background painted over the image
 
 Parser verified with a headless VTerm harness: 40/40 checks
-pass, stock parser fails 23 of the same 40.
+pass, stock parser fails 23 of the same 40; explicit-background
+checks 9/9.
 
 Apply after the Debian patch series (the setup script does the
 whole cycle):  patch -p1 < fbterm-compat.patch
 
 --- a/src/lib/vterm.h
 +++ b/src/lib/vterm.h
-@@ -167,6 +167,10 @@
+@@ -32,7 +32,7 @@
+ 
+ 		bool operator != (const CharAttr a) {
+ 			return fcolor != a.fcolor || bcolor != a.bcolor || intensity != a.intensity
+-				|| italic != a.italic || underline != a.underline || blink != a.blink || reverse != a.reverse;
++				|| italic != a.italic || underline != a.underline || blink != a.blink || reverse != a.reverse || bg_set != a.bg_set;
+ 		}
+ 
+ 		u16 fcolor : 8;
+@@ -42,6 +42,7 @@
+ 		u16 underline : 1;
+ 		u16 blink : 1;
+ 		u16 reverse : 1;
++		u16 bg_set : 1; // background set explicitly (paint it even if it is colour 0)
+ 		u16 type : 2;
+ 	};
+ 
+@@ -167,6 +168,10 @@
  	u32 translate_char(u32);
  	void set_cursor_type();
  	void linux_specific();
@@ -40,7 +70,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  	void begin_set_palette();
  	void set_palette();
  	void reset_palette();
-@@ -185,7 +189,7 @@
+@@ -185,7 +190,7 @@
  	static bool init_ambiguous_wide();
  
  	typedef enum {
@@ -49,7 +79,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  	} EscapeState;
  
  	EscapeState esc_state;
-@@ -266,6 +270,15 @@
+@@ -266,6 +271,15 @@
  	#define NPAR 16
  	u16 npar, param[NPAR];
  	bool q_mode, palette_mode;
@@ -87,7 +117,24 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  };
 --- a/src/lib/vterm.cpp
 +++ b/src/lib/vterm.cpp
-@@ -112,6 +112,12 @@
+@@ -25,7 +25,7 @@
+ #define MIN(a, b) ((a) < (b) ? (a) : (b))
+ #define MAX(a, b) ((a) > (b) ? (a) : (b))
+ 
+-VTerm::CharAttr VTerm::default_char_attr = { 0, 0, 1, 0, 0, 0, 0, VTerm::CharAttr::Single };
++VTerm::CharAttr VTerm::default_char_attr = { 0, 0, 1, 0, 0, 0, 0, 0, VTerm::CharAttr::Single };
+ 
+ VTerm::CharAttr VTerm::normal_char_attr()
+ {
+@@ -50,6 +50,7 @@
+ 
+ 	a.fcolor = char_attr.fcolor;
+ 	a.bcolor = char_attr.bcolor;
++	a.bg_set = char_attr.bg_set;
+ 	a.blink = char_attr.blink;
+ 
+ 	return a;
+@@ -112,6 +113,12 @@
  	history_save_line = 0;
  	visual_start_line = 0;
  
@@ -100,7 +147,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  	reset();
  	resize(w, h);
  }
-@@ -122,6 +128,9 @@
+@@ -122,6 +129,9 @@
  
  	delete[] text;
  	delete[] attrs;
@@ -110,7 +157,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  	delete[] tab_stops;
  	delete[] linenumbers;
  	delete[] dirty_startx;
-@@ -138,6 +147,7 @@
+@@ -138,6 +148,7 @@
  	charset = g0_charset;
  
  	esc_state = ESnormal;
@@ -118,7 +165,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  
  	pending_scroll = 0;
  	scroll_top = 0;
-@@ -469,6 +479,31 @@
+@@ -469,6 +480,31 @@
  
  void VTerm::do_control_char()
  {
@@ -150,7 +197,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  	u8 index = (cur_char < MAX_CONTROL_CODE ? control_map[cur_char] : 0);
  	const Sequence *seq = control_sequences + index;
  
-@@ -608,7 +643,7 @@
+@@ -608,7 +644,7 @@
  	if (num > mx) num = mx;
  	if (-num > mx) num = -mx;
  
@@ -159,7 +206,7 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  		history_scroll(num);
  	}
  
-@@ -778,6 +813,7 @@
+@@ -778,6 +814,7 @@
  
  void VTerm::historyDisplay(bool absolute, s32 num)
  {
@@ -444,27 +491,32 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  			break;
  		case 39:
  			char_attr.fcolor = cur_fcolor;
-@@ -530,9 +671,31 @@
+@@ -529,9 +670,36 @@
+ 			break;
  		case 40 ... 47:
  			char_attr.bcolor = param[n] % 10;
- 			break;
++			char_attr.bg_set = true;
++			break;
 +		case 48:
 +			if (n + 2 <= npar && param[n + 1] == 5) {
 +				// SGR 48;5;<n>: 256-colour background
 +				char_attr.bcolor = param[n + 2];
++				char_attr.bg_set = true;
 +				n += 2;
 +			} else if (n + 4 <= npar && param[n + 1] == 2) {
 +				// SGR 48;2;<r>;<g>;<b>: truecolor (approximated)
 +				char_attr.bcolor = rgb_to_256(param[n + 2], param[n + 3], param[n + 4]);
++				char_attr.bg_set = true;
 +				n += 4;
 +			} else if (n < npar && (param[n + 1] == 5 || param[n + 1] == 2)) {
 +				// truncated extended colour sequence: ignore it
 +				n = npar;
 +			}
-+			break;
+ 			break;
  		case 49:
  			char_attr.bcolor = cur_bcolor;
- 			break;
++			char_attr.bg_set = false;
++			break;
 +		case 90 ... 97:
 +			// bright foreground colours
 +			char_attr.fcolor = param[n] - 90 + 8;
@@ -472,13 +524,52 @@ whole cycle):  patch -p1 < fbterm-compat.patch
 +		case 100 ... 107:
 +			// bright background colours
 +			char_attr.bcolor = param[n] - 100 + 8;
-+			break;
++			char_attr.bg_set = true;
+ 			break;
  		default :
  			break;
- 		}
+@@ -689,7 +857,10 @@
+ 		break;
+ 
+ 	case 2:
+-		if (npar == 1) char_attr.bcolor = param[1];
++		if (npar == 1) {
++			char_attr.bcolor = param[1];
++			char_attr.bg_set = true;
++		}
+ 		break;
+ 
+ 	case 3:
 --- a/src/fbshell.cpp
 +++ b/src/fbshell.cpp
-@@ -700,7 +700,6 @@
+@@ -368,7 +368,7 @@
+ 	if (manager->activeShell() != this) return;
+ 
+ 	adjustCharAttr(attr);
+-	screen->drawText(FW(x), FH(y), attr.fcolor, attr.bcolor, num, chars, dws);
++	screen->drawText(FW(x), FH(y), attr.fcolor, attr.bcolor, num, chars, dws, attr.bg_set);
+ 
+ 	if (mImProxy) {
+ 		Rectangle rect = { FW(x), FH(y), FW(w), FH(1) };
+@@ -425,7 +425,7 @@
+ 		break;
+ 
+ 	case CurUnderline:
+-		screen->fillRect(FW(mCursor.x), FH(mCursor.y + 1) - 1, FW(1), 1, mCursor.showed ? mCursor.attr.fcolor : mCursor.attr.bcolor);
++		screen->fillRect(FW(mCursor.x), FH(mCursor.y + 1) - 1, FW(1), 1, mCursor.showed ? mCursor.attr.fcolor : mCursor.attr.bcolor, mCursor.showed ? true : mCursor.attr.bg_set);
+ 		if (mImProxy) {
+ 			Rectangle rect = { FW(mCursor.x), FH(mCursor.y + 1) - 1, FW(1), 1 };
+ 			mImProxy->redrawImWin(rect);
+@@ -660,7 +660,7 @@
+ 		u16 code = charCode(x, y);
+ 
+ 		if (attr.type == CharAttr::DoubleRight) x--;
+-		screen->drawText(FW(x), FH(y), attr.bcolor, attr.fcolor, 1, &code, &dw);
++		screen->drawText(FW(x), FH(y), attr.bcolor, attr.fcolor, 1, &code, &dw, true);
+ 
+ 		mMousePointer.x = x;
+ 		mMousePointer.y = y;
+@@ -700,13 +700,13 @@
  	else if (attr.underline) attr.fcolor = 6; // cyan
  	else if (attr.intensity == 0) attr.fcolor = 8; // gray
  
@@ -486,3 +577,244 @@ whole cycle):  patch -p1 < fbterm-compat.patch
  	if (attr.intensity == 2 && attr.fcolor < 8) attr.fcolor ^= 8;
  
  	if (attr.reverse) {
+ 		u16 temp = attr.bcolor;
+ 		attr.bcolor = attr.fcolor;
+ 		attr.fcolor = temp;
++		attr.bg_set = true; // the swapped-in background is meant to be seen
+ 
+ 		if (attr.bcolor > 8 && attr.bcolor < 16) attr.bcolor -= 8;
+ 	}
+--- a/src/screen.h
++++ b/src/screen.h
+@@ -45,8 +45,8 @@
+ 	void rotateRect(u32 &x, u32 &y, u32 &w, u32 &h);
+ 	void rotatePoint(u32 w, u32 h, u32 &x, u32 &y);
+ 
+-	void drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw);
+-	void fillRect(u32 x, u32 y, u32 w, u32 h, u8 color);
++	void drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet = false);
++	void fillRect(u32 x, u32 y, u32 w, u32 h, u8 color, bool bgSet = false);
+ 
+ 	bool move(u16 scol, u16 srow, u16 dcol, u16 drow, u16 w, u16 h);
+ 	void setPalette(const Color *palette);
+@@ -77,26 +77,26 @@
+ 	virtual const s8 *drvId() = 0;
+ 
+ 	void eraseMargin(bool top, u16 h);
+-	void drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw);
+-	void drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw);
++	void drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet = false);
++	void drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw, bool bgSet = false);
+ 	void adjustOffset(u32 &x, u32 &y);
+ 
+ 	void initFillDraw();
+ 	void endFillDraw();
+ 
+-	void fillX(u32 x, u32 y, u32 w, u8 color);
+-	void fillXBg(u32 x, u32 y, u32 w, u8 color);
+-	void draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw15(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw16(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw32(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw15Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw16Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
+-	void draw32Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
++	void fillX(u32 x, u32 y, u32 w, u8 color, bool bgSet);
++	void fillXBg(u32 x, u32 y, u32 w, u8 color, bool bgSet);
++	void draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw15(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw16(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw32(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw15Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw16Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++	void draw32Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
+ 
+-	typedef void (Screen::*fillFun)(u32 x, u32 y, u32 w, u8 color);
+-	typedef void (Screen::*drawFun)(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
++	typedef void (Screen::*fillFun)(u32 x, u32 y, u32 w, u8 color, bool bgSet);
++	typedef void (Screen::*drawFun)(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
+ 
+ 	fillFun fill;
+ 	drawFun draw;
+--- a/src/screen.cpp
++++ b/src/screen.cpp
+@@ -197,7 +197,7 @@
+ 	}
+ }
+ 
+-void Screen::drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw)
++void Screen::drawText(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet)
+ {
+ 	u32 startx, fw = FW(1);
+ 
+@@ -208,7 +208,7 @@
+ 		if (*text == 0x20) {
+ 			if (draw_text) {
+ 				draw_text = false;
+-				drawGlyphs(startx, y, fc, bc, startnum - num, starttext, startdw);
++				drawGlyphs(startx, y, fc, bc, startnum - num, starttext, startdw, bgSet);
+ 			}
+ 
+ 			if (!draw_space) {
+@@ -218,7 +218,7 @@
+ 		} else {
+ 			if (draw_space) {
+ 				draw_space = false;
+-				fillRect(startx, y, x - startx, FH(1), bc);
++				fillRect(startx, y, x - startx, FH(1), bc, bgSet);
+ 			}
+ 
+ 			if (!draw_text) {
+@@ -234,16 +234,16 @@
+ 	}
+ 
+ 	if (draw_text) {
+-		drawGlyphs(startx, y, fc, bc, startnum - num, starttext, startdw);
++		drawGlyphs(startx, y, fc, bc, startnum - num, starttext, startdw, bgSet);
+ 	} else if (draw_space) {
+-		fillRect(startx, y, x - startx, FH(1), bc);
++		fillRect(startx, y, x - startx, FH(1), bc, bgSet);
+ 	}
+ }
+ 
+-void Screen::drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw)
++void Screen::drawGlyphs(u32 x, u32 y, u8 fc, u8 bc, u16 num, u16 *text, bool *dw, bool bgSet)
+ {
+ 	for (; num--; text++, dw++) {
+-		drawGlyph(x, y, fc, bc, *text, *dw);
++		drawGlyph(x, y, fc, bc, *text, *dw, bgSet);
+ 		x += *dw ? FW(2) : FW(1);
+ 	}
+ }
+@@ -254,7 +254,7 @@
+ 	else y += mOffsetCur;
+ }
+ 
+-void Screen::fillRect(u32 x, u32 y, u32 w, u32 h, u8 color)
++void Screen::fillRect(u32 x, u32 y, u32 w, u32 h, u8 color, bool bgSet)
+ {
+ 	if (x >= mWidth || y >= mHeight || !w || !h) return;
+ 	if (x + w > mWidth) w = mWidth - x;
+@@ -265,11 +265,11 @@
+ 
+ 	for (; h--;) {
+ 		if (mScrollType == YWrap && y > mOffsetMax) y -= mOffsetMax + 1;
+-		(this->*fill)(x, y++, w, color);
++		(this->*fill)(x, y++, w, color, bgSet);
+ 	}
+ }
+ 
+-void Screen::drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw)
++void Screen::drawGlyph(u32 x, u32 y, u8 fc, u8 bc, u16 code, bool dw, bool bgSet)
+ {
+ 	if (x >= mWidth || y >= mHeight) return;
+ 
+@@ -279,7 +279,7 @@
+ 
+ 	Font::Glyph *glyph = (Font::Glyph *)Font::instance()->getGlyph(code);
+ 	if (!glyph) {
+-		fillRect(x, y, w, h, bc);
++		fillRect(x, y, w, h, bc, bgSet);
+ 		return;
+ 	}
+ 
+@@ -299,14 +299,14 @@
+ 	if (y + top + height > mHeight) height = mHeight - (y + top);
+ 	if (height < 0) height = 0;
+ 
+-	if (top) fillRect(x, y, w, top, bc);
+-	if (left > 0) fillRect(x, y + top, left, height, bc);
++	if (top) fillRect(x, y, w, top, bc, bgSet);
++	if (left > 0) fillRect(x, y + top, left, height, bc, bgSet);
+ 
+ 	s32 right = width + left;
+-	if (w > right) fillRect((s32)x + right, y + top, w - right, height, bc);
++	if (w > right) fillRect((s32)x + right, y + top, w - right, height, bc, bgSet);
+ 
+ 	s32 bot = top + height;
+-	if (h > bot) fillRect(x, y + bot, w, h - bot, bc);
++	if (h > bot) fillRect(x, y + bot, w, h - bot, bc, bgSet);
+ 
+ 	x += left;
+ 	y += top;
+@@ -331,7 +331,7 @@
+ 	adjustOffset(x, y);
+ 	for (; nheight--; y++, pixmap += glyph->pitch) {
+ 		if ((mScrollType == YWrap) && y > mOffsetMax) y -= mOffsetMax + 1;
+-		(this->*draw)(x, y, nwidth, fc, bc, pixmap);
++		(this->*draw)(x, y, nwidth, fc, bc, pixmap, bgSet);
+ 	}
+ }
+ 
+--- a/src/screen_render.cpp
++++ b/src/screen_render.cpp
+@@ -109,7 +109,7 @@
+ 	if (bgimage_mem) delete[] bgimage_mem;
+ }
+ 
+-void Screen::fillX(u32 x, u32 y, u32 w, u8 color)
++void Screen::fillX(u32 x, u32 y, u32 w, u8 color, bool bgSet)
+ {
+ 	u32 c = fillColors[color];
+ 	u8 *dst = mVMemBase + y * mBytesPerLine + x * bytes_per_pixel;
+@@ -129,17 +129,17 @@
+ 	}
+ }
+ 
+-void Screen::fillXBg(u32 x, u32 y, u32 w, u8 color)
++void Screen::fillXBg(u32 x, u32 y, u32 w, u8 color, bool bgSet)
+ {
+-	if (color == bgcolor) {
++	if (color == bgcolor && !bgSet) {
+ 		u32 offset = y * mBytesPerLine + x * bytes_per_pixel;
+ 		memcpy(mVMemBase + offset, bgimage_mem + offset, w * bytes_per_pixel);
+ 	} else {
+-		fillX(x, y, w, color);
++		fillX(x, y, w, color, bgSet);
+ 	}
+ }
+ 
+-void Screen::draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap)
++void Screen::draw8(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet)
+ {
+ 	bool isfg;
+ 	u8 *dst = mVMemBase + y * mBytesPerLine + x * bytes_per_pixel;
+@@ -150,10 +150,10 @@
+ 	}
+ }
+ 
+-void Screen::draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap)
++void Screen::draw8Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet)
+ {
+-	if (bc != bgcolor) {
+-		draw8(x, y, w, fc, bc, pixmap);
++	if (bc != bgcolor || bgSet) {
++		draw8(x, y, w, fc, bc, pixmap, bgSet);
+ 		return;
+ 	}
+ 
+@@ -170,7 +170,7 @@
+ 
+ #define drawX(bits, lred, lgreen, lblue, type, fbwrite) \
+  \
+-void Screen::draw##bits(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap) \
++void Screen::draw##bits(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet) \
+ { \
+ 	u8 red, green, blue; \
+ 	u8 pixel; \
+@@ -199,10 +199,10 @@
+ 
+ #define drawXBg(bits, lred, lgreen, lblue, type, fbwrite) \
+  \
+-void Screen::draw##bits##Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap) \
++void Screen::draw##bits##Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet) \
+ { \
+-	if (bc != bgcolor) { \
+-		draw##bits(x, y, w, fc, bc, pixmap); \
++	if (bc != bgcolor || bgSet) { \
++		draw##bits(x, y, w, fc, bc, pixmap, bgSet); \
+ 		return; \
+ 	} \
+  \
