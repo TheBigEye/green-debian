@@ -6,5 +6,26 @@
         "color": {
             "1": "green"
         }
-    }
+    },
+    "modules": [
+        "title",
+        "separator",
+        "os",
+        "host",
+        "kernel",
+        "uptime",
+        "packages",
+        "shell",
+        "display",
+        "terminal",
+        "cpu",
+        "gpu",
+        "memory",
+        "swap",
+        "disk",
+        "localip",
+        "locale",
+        "break",
+        "colors"
+    ]
 }
