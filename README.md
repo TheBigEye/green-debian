@@ -412,12 +412,45 @@ sudo rm /usr/local/bin/fbterm-patched
 ./setup-fbterm-background.sh
 ```
 
+### Changing the wallpaper
+
+Once the setup is installed, use `set-fbterm-wallpaper.sh`:
+
+```sh
+./set-fbterm-wallpaper.sh ~/Pictures/my-image.jpg
+```
+
+Step by step, this is what it does:
+
+1. It copies the image over the installed background file,
+   `~/.local/share/fbterm-background/wallpaper.png`. The old background
+   is kept next to it as `wallpaper.png.bak`.
+2. A PNG image is used as it is. JPG, WebP, GIF and BMP images are
+   converted to PNG first. For that, one of these has to be installed:
+   ImageMagick, ffmpeg, or python3 with PIL. If none is available, the
+   script stops and tells you, and the old background stays in place.
+3. FbTerm reads the background only when it starts. So if you run the
+   script inside a running FbTerm, it asks whether to restart FbTerm
+   now. Restarting ends your session inside FbTerm (like typing
+   `exit`) and takes you back to the login prompt. Log in again and
+   the new image is there.
+
+To change and restart in one step, without being asked:
+
+```sh
+./set-fbterm-wallpaper.sh ~/Pictures/my-image.jpg --restart
+```
+
+If you answer no at the question, nothing bad happens. The new image
+simply shows the next time FbTerm starts.
+
 ### Files in this folder
 
 | File | Purpose |
 | --- | --- |
 | `setup-fbterm-background.sh` | The installer and uninstaller. Runs in phases and verifies itself. |
-| `wallpaper.png` | The background image. Replace it with your own if you like. |
+| `set-fbterm-wallpaper.sh` | Changes the installed background image. See "Changing the wallpaper" above. |
+| `wallpaper.png` | The default background image, installed by the setup script. |
 | `idump` | The framebuffer image viewer, a small static binary. |
 | `idump-0.2.0.tar.gz` and `idump.sha256` | The viewer source and its checksum. Used by `--rebuild-idump`, or if the binary is missing from a fresh clone. |
 | `Default8x16.bdf` | The classic 8x16 console font, registered through fontconfig. |
@@ -456,10 +489,16 @@ programs expect. The patch adds them:
   get the old behaviour, byte for byte. The Caps Lock and Num Lock LEDs
   are kept in sync as well.
 
-Two small limits of the kitty support, for honesty: while it is active,
-the kernel's "hold Alt and type a number on the keypad" character
-composition is not reproduced, and neither are braille keys. Both are
-rare on a normal console.
+- **Alt+keypad composition keeps working.** Hold Alt, type a decimal
+  code on the numeric keypad (for example Alt+227 for "ã"), release Alt,
+  and the character is inserted. That is the classic console behaviour,
+  and it is also reproduced while the kitty protocol is active, where
+  the kernel cannot do it for you. The AltGr variant composes a
+  hexadecimal code instead. In plain mode it was never broken: there
+  the kernel handles it, as always.
+
+One small limit of the kitty support, for honesty: while it is active,
+braille keys are not reproduced. They are rare on a normal console.
 
 ---
 
