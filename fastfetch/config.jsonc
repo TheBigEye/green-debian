@@ -2,7 +2,7 @@
     "$schema": "https://github.com/fastfetch-cli/fastfetch/wiki/Json-Schema",
     "logo": {
         "type": "file-raw",
-        "source": "~/.config/fastfetch/carat.txt"
+        "source": "~/.config/fastfetch/cleat-03.txt"
     },
     "modules": [
         "title",
