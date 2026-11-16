@@ -444,6 +444,35 @@ To change and restart in one step, without being asked:
 If you answer no at the question, nothing bad happens. The new image
 simply shows the next time FbTerm starts.
 
+### If some colours are hard to read
+
+Dark colours on a black or busy background are a known problem. The
+classic example is dark blue text, like the `UUID=` lines when you edit
+`/etc/fstab` in vim. Two things fix it here:
+
+1. **The patched FbTerm uses a brightened palette.** The first 16
+   terminal colours keep their usual hues but are lighter than the old
+   VGA values. Dark blue, dark red and the grey used for comments are
+   the ones that change the most. This helps in every program, not
+   just vim, because the fix is in the terminal itself. The 256-colour
+   range is not changed. To get it, rebuild the patched FbTerm:
+
+   ```sh
+   sudo rm /usr/local/bin/fbterm-patched
+   ./setup-fbterm-background.sh
+   ```
+
+2. **The background image can be darkened.** Edit
+   `~/.config/fbterm-background/config` and lower `FBTERM_BRIGHTNESS`.
+   It is a percentage: 100 is the original image, lower is darker.
+   New installs start at 35. Your file is not overwritten when you run
+   the installer again, so change it by hand. The change shows the
+   next time FbTerm starts.
+
+If text is still hard to read inside vim, also try a colour scheme
+made for dark backgrounds, for example with `:colorscheme habamax`
+inside vim (put `colorscheme habamax` in `~/.vimrc` to keep it).
+
 ### Files in this folder
 
 | File | Purpose |
