@@ -551,6 +551,11 @@ verify_install() {
     fi
     if [ -f "$HOME/.fbtermrc" ] && grep -q '^font-names=Default8x16' "$HOME/.fbtermrc"; then
         v_ok "$HOME/.fbtermrc uses Default8x16"
+    elif [ -f "$HOME/.fbtermrc" ] \
+         && ! grep -qF '# Created by fbterm-background installer' "$HOME/.fbtermrc"; then
+        # The user brought their own ~/.fbtermrc and the installer
+        # deliberately kept it; their font choice is not a failure.
+        v_skip "$HOME/.fbtermrc is the user's own (font check skipped)"
     else
         v_bad "$HOME/.fbtermrc does not set font-names=Default8x16"
     fi

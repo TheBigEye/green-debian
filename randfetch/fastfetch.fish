@@ -1,5 +1,5 @@
 function fastfetch --description 'fastfetch with a random logo from ~/.config/fastfetch'
-    set -l logos (find $HOME/.config/fastfetch -maxdepth 1 -type f -name '*.txt')
+    set -l logos (find $HOME/.config/fastfetch -maxdepth 1 -type f -name '*.txt' 2>/dev/null)
     if test (count $logos) -eq 0
         command fastfetch $argv
         return $status

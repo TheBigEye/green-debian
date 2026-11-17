@@ -52,7 +52,12 @@ for arg in "$@"; do
 done
 
 [ -n "$SRC" ] || { usage >&2; exit 2; }
-[ "$(id -u)" -ne 0 ] || fail "do not run this as root; it would change root's background, not yours."
+# Running as root is fine from a root shell: it changes root's own
+# background. But "sudo ..." from a normal user almost always means
+# that user wanted their own background changed, not root's.
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    fail "you ran this with sudo from user '$SUDO_USER', so it would change root's background, not yours. Run it without sudo, or from a root shell if root's background is really what you want to change."
+fi
 [ -f "$SRC" ] || fail "image not found: $SRC"
 [ -r "$SRC" ] || fail "image is not readable: $SRC"
 [ -d "$DATA" ] || fail "$DATA does not exist. Run setup-fbterm-background.sh first."
