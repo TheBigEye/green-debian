@@ -4,8 +4,8 @@ Description=Generic Linux Tux Logo boot animation, inspired by the Boot animatio
 ModuleName=two-step
 
 [two-step]
-Font=Cantarell 12
-TitleFont=Cantarell Light 30
+Font=Default8x16 12
+TitleFont=Default8x16 12
 ImageDir=/usr/share/plymouth/themes/tux-boot
 DialogHorizontalAlignment=.5
 DialogVerticalAlignment=.5
@@ -31,6 +31,7 @@ MessageBelowAnimation=true
 [boot-up]
 UseEndAnimation=true
 UseFirmwareBackground=false
+SuppressMessages=true
 
 [shutdown]
 UseEndAnimation=true

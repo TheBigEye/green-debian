@@ -1,0 +1,22 @@
+#!/bin/sh
+# initramfs-tools hook: copy the Default8x16 font into the initramfs
+# so the Plymouth tux-boot theme can use it (Font=Default8x16).
+#
+# Install as /etc/initramfs-tools/hooks/default8x16-plymouth-font
+# (executable). The name matters: hooks run in alphabetical order and
+# this one must run before the "plymouth" hook, because that hook is
+# the one that builds the fontconfig cache inside the initramfs.
+PREREQ=""
+prereqs() { echo "${PREREQ}"; }
+case "${1:-}" in
+    prereqs) prereqs; exit 0 ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+FONT_FILE=/usr/share/fonts/Default8x16/Default8x16.bdf
+if [ -f "$FONT_FILE" ]; then
+    copy_file font "$FONT_FILE"
+else
+    echo "W: default8x16-plymouth-font: $FONT_FILE not found, Plymouth keeps its fallback font" >&2
+fi
