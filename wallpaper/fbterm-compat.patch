@@ -1,6 +1,6 @@
 diff -ruN '--exclude=Makefile.in' a/src/Makefile.am b/src/Makefile.am
 --- a/src/Makefile.am	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/Makefile.am	2026-11-19 03:16:18.856292757 +0000
++++ b/src/Makefile.am	2026-11-19 04:08:50.036471671 +0000
 @@ -3,7 +3,7 @@
  bin_PROGRAMS = fbterm
  
@@ -12,7 +12,7 @@ diff -ruN '--exclude=Makefile.in' a/src/Makefile.am b/src/Makefile.am
  
 diff -ruN '--exclude=Makefile.in' a/src/fbshell.cpp b/src/fbshell.cpp
 --- a/src/fbshell.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/fbshell.cpp	2026-11-19 03:16:18.856292757 +0000
++++ b/src/fbshell.cpp	2026-11-19 04:08:50.036471671 +0000
 @@ -33,28 +33,35 @@
  #include "screen.h"
  #include "improxy.h"
@@ -120,7 +120,7 @@ diff -ruN '--exclude=Makefile.in' a/src/fbshell.cpp b/src/fbshell.cpp
  	}
 diff -ruN '--exclude=Makefile.in' a/src/input.cpp b/src/input.cpp
 --- a/src/input.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/input.cpp	2026-11-19 03:16:18.856292757 +0000
++++ b/src/input.cpp	2026-11-19 04:08:50.036471671 +0000
 @@ -28,6 +28,7 @@
  #include <linux/input.h>
  #include "input.h"
@@ -294,7 +294,7 @@ diff -ruN '--exclude=Makefile.in' a/src/input.cpp b/src/input.cpp
 +}
 diff -ruN '--exclude=Makefile.in' a/src/input.h b/src/input.h
 --- a/src/input.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/input.h	2026-11-19 03:16:18.856292757 +0000
++++ b/src/input.h	2026-11-19 04:08:50.036471671 +0000
 @@ -24,19 +24,34 @@
  #include "io.h"
  #include "instance.h"
@@ -332,7 +332,7 @@ diff -ruN '--exclude=Makefile.in' a/src/input.h b/src/input.h
  #endif
 diff -ruN '--exclude=Makefile.in' a/src/kittykey.cpp b/src/kittykey.cpp
 --- a/src/kittykey.cpp	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/kittykey.cpp	2026-11-19 03:16:18.856292757 +0000
++++ b/src/kittykey.cpp	2026-11-19 04:08:50.036471671 +0000
 @@ -0,0 +1,648 @@
 +/*
 + *   kittykey.cpp - kitty keyboard protocol encoder (see kittykey.h).
@@ -984,7 +984,7 @@ diff -ruN '--exclude=Makefile.in' a/src/kittykey.cpp b/src/kittykey.cpp
 +}
 diff -ruN '--exclude=Makefile.in' a/src/kittykey.h b/src/kittykey.h
 --- a/src/kittykey.h	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/kittykey.h	2026-11-19 03:16:18.856292757 +0000
++++ b/src/kittykey.h	2026-11-19 04:08:50.036471671 +0000
 @@ -0,0 +1,75 @@
 +/*
 + *   kittykey.h - kitty keyboard protocol encoder for FbTerm.
@@ -1063,7 +1063,7 @@ diff -ruN '--exclude=Makefile.in' a/src/kittykey.h b/src/kittykey.h
 +#endif
 diff -ruN '--exclude=Makefile.in' a/src/lib/shell.cpp b/src/lib/shell.cpp
 --- a/src/lib/shell.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/shell.cpp	2026-11-19 03:17:40.264292757 +0000
++++ b/src/lib/shell.cpp	2026-11-19 04:08:50.036471671 +0000
 @@ -144,8 +144,9 @@
  	s32 btn = buttons & MouseButtonMask;
  	s32 modifies = buttons & ModifyButtonMask;
@@ -1137,8 +1137,8 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/shell.cpp b/src/lib/shell.cpp
  		snprintf(buf, sizeof(buf), "\e[M%c%c%c", ' ' + val, ' ' + x + 1, ' ' + y + 1);
  		sendBack(buf);
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.cpp b/src/lib/vterm.cpp
---- a/src/lib/vterm.cpp	2026-11-19 03:16:18.848292757 +0000
-+++ b/src/lib/vterm.cpp	2026-11-19 03:16:18.856292757 +0000
+--- a/src/lib/vterm.cpp	2026-11-19 04:08:50.028471671 +0000
++++ b/src/lib/vterm.cpp	2026-11-19 04:08:50.036471671 +0000
 @@ -25,7 +25,7 @@
  #define MIN(a, b) ((a) < (b) ? (a) : (b))
  #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -1267,7 +1267,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.cpp b/src/lib/vterm.cpp
  	u32 bak_line = visual_start_line;
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
 --- a/src/lib/vterm.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/vterm.h	2026-11-19 03:18:06.968292757 +0000
++++ b/src/lib/vterm.h	2026-11-19 04:08:50.036471671 +0000
 @@ -32,7 +32,7 @@
  
  		bool operator != (const CharAttr a) {
@@ -1391,7 +1391,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
  	static u16 history_lines;
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
 --- a/src/lib/vterm_action.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/vterm_action.cpp	2026-11-19 03:17:40.128292757 +0000
++++ b/src/lib/vterm_action.cpp	2026-11-19 04:08:50.036471671 +0000
 @@ -92,10 +92,64 @@
  {
  	q_mode = 0;
@@ -1798,8 +1798,8 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_act
  
  	case 3:
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_states.cpp b/src/lib/vterm_states.cpp
---- a/src/lib/vterm_states.cpp	2026-11-19 03:16:18.848292757 +0000
-+++ b/src/lib/vterm_states.cpp	2026-11-19 03:16:18.856292757 +0000
+--- a/src/lib/vterm_states.cpp	2026-11-19 04:08:50.028471671 +0000
++++ b/src/lib/vterm_states.cpp	2026-11-19 04:08:50.036471671 +0000
 @@ -50,7 +50,8 @@
  
  	// ESesc
@@ -1842,35 +1842,268 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_states.cpp b/src/lib/vterm_sta
  };
 diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
 --- a/src/mouse.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/mouse.cpp	2026-11-19 03:17:47.380292757 +0000
-@@ -92,6 +92,7 @@
++++ b/src/mouse.cpp	2026-11-19 04:10:23.764471671 +0000
+@@ -32,6 +32,7 @@
+ #include <sys/types.h>
+ #include <sys/socket.h>
+ #include <sys/un.h>
++#include <sys/timerfd.h>
+ #include <linux/keyboard.h>
+ #include "fbshellman.h"
+ #include "fbshell.h"
+@@ -41,6 +42,7 @@
+ {
+ 	s8 buf[64];
+ 	s32 ret = ttyname_r(STDIN_FILENO, buf, sizeof(buf));
++	if (ret || !buf[0]) return -1;
+ 
+ 	u32 index = strlen(buf) - 1;
+ 	while (buf[index] >= '0' && buf[index] <= '9') index--;
+@@ -72,7 +74,7 @@
+ 	return gpm_fd;
+ }
+ 
+-Mouse *Mouse::createInstance()
++bool Mouse::connectGpm()
+ {
+ 	Gpm_Connect conn;
+ 	conn.eventMask = ~0;
+@@ -81,17 +83,73 @@
+ 	conn.minMod = 0;
+ 
+ 	s32 fd = open_gpm(&conn);
+-	if (fd == -1) return 0;
++	if (fd == -1) return false;
++
++	setFd(fd);
++	return true;
++}
+ 
++Mouse *Mouse::createInstance()
++{
+ 	Mouse *mouse = new Mouse();
+-	mouse->setFd(fd);
++	if (!mouse->connectGpm()) {
++		delete mouse;
++		return 0;
++	}
+ 
+ 	return mouse;
+ }
+ 
++// While no client is connected for this console, the gpm daemon
++// falls back to its own selection handling and draws its pointer
++// with the kernel text selection. On a framebuffer console that
++// repaints cells from the text buffer and erases what FbTerm drew.
++// So when the daemon goes away (restart, package upgrade), drop
++// the dead socket, reconnect, and repaint everything.
++void Mouse::ioError(bool read, s32 err)
++{
++	if (!read) return;
++
++	setFd(-1);
++	evLen = 0; // a partial event from the dead daemon is useless
++
++	if (connectGpm()) {
++		redrawScreen();
++		return;
++	}
++
++	// The daemon can take a while to come back (a service restart
++	// probes the mouse hardware). Do not give up: retry on a timer
++	// until it answers. With no client connected, the daemon draws
++	// its own pointer over the framebuffer and erases the screen.
++	s32 tfd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
++	if (tfd == -1) return;
++
++	struct itimerspec ts;
++	memset(&ts, 0, sizeof(ts));
++	ts.it_value.tv_nsec = 250 * 1000 * 1000;
++	ts.it_interval.tv_nsec = 250 * 1000 * 1000;
++	if (timerfd_settime(tfd, 0, &ts, NULL) == -1) {
++		close(tfd);
++		return;
++	}
++
++	reconnectPending = true;
++	setFd(tfd);
++}
++
++void Mouse::redrawScreen()
++{
++	FbShell *shell = FbShellManager::instance()->activeShell();
++	if (shell) shell->expose(0, 0, shell->w(), shell->h());
++}
++
  Mouse::Mouse()
  {
  	x = y = 0;
 +	prevButtons = 0;
++	evLen = 0;
++	reconnectPending = false;
  }
  
  Mouse::~Mouse()
-@@ -124,6 +125,14 @@
- 		if (ev->buttons & GPM_B_RIGHT) buttons |= RightButton;
- 		if (type == Wheel) buttons |= ((ev->wdy < 0) ? WheelDown : WheelUp);
+@@ -100,49 +158,82 @@
  
-+		// On release the event already shows the button as up, so
-+		// report the state from just before it: SGR encoding needs
-+		// to know which button was released. Then remember the
-+		// new state for the next event.
-+		s32 stateButtons = buttons;
-+		if (type == Release) buttons = prevButtons;
-+		prevButtons = stateButtons;
+ void Mouse::readyRead(s8 *buf, u32 len)
+ {
+-	if (len % sizeof(Gpm_Event)) return;
++	if (reconnectPending) {
++		// The fd is the retry timer, not the daemon socket.
++		if (connectGpm()) {
++			reconnectPending = false;
++			redrawScreen();
++		}
++		return;
++	}
+ 
++	// The socket is a byte stream: a read can split an event or
++	// glue several together. The old code dropped partial reads,
++	// which misaligned the stream for good and turned every later
++	// event into garbage. Keep the leftover bytes instead.
+ 	FbShell *shell = FbShellManager::instance()->activeShell();
+-	if (!shell) return;
+ 
+-	u16 maxx = Screen::instance()->cols(), maxy = Screen::instance()->rows();
++	while (len) {
++		u32 need = sizeof(Gpm_Event) - evLen;
++		u32 take = len < need ? len : need;
++		memcpy(evBuf + evLen, buf, take);
++		evLen += take;
++		buf += take;
++		len -= take;
 +
- 		if (ev->modifiers & (1 << KG_SHIFT)) buttons |= ShiftButton;
- 		if (ev->modifiers & (1 << KG_CTRL)) buttons |= ControlButton;
- 		if (ev->modifiers & ((1 << KG_ALT) | (1 << KG_ALTGR))) buttons |= AltButton;
++		if (evLen == sizeof(Gpm_Event)) {
++			evLen = 0;
++			if (shell) processEvent(shell, (Gpm_Event *)evBuf);
++		}
++	}
++}
+ 
+-	len /= sizeof(Gpm_Event);
+-	Gpm_Event *ev = (Gpm_Event *)buf;
++void Mouse::processEvent(FbShell *shell, Gpm_Event *ev)
++{
++	u16 maxx = Screen::instance()->cols(), maxy = Screen::instance()->rows();
+ 
+-	for (; len--; ev++) {
+-		s32 type = -1, buttons = 0;
++	s32 type = -1, buttons = 0;
+ 
+-		if (ev->wdy) type = Wheel;
+-		else if ((ev->type & GPM_MOVE) || (ev->type & GPM_DRAG)) type = Move;
+-		else if (ev->type & GPM_DOWN) type = (ev->type & GPM_DOUBLE) ? DblClick : Press;
+-		else if (ev->type & GPM_UP) type = Release;
+-		if (type == -1) continue;
+-
+-		if (ev->buttons & GPM_B_LEFT) buttons |= LeftButton;
+-		if (ev->buttons & GPM_B_MIDDLE) buttons |= MidButton;
+-		if (ev->buttons & GPM_B_RIGHT) buttons |= RightButton;
+-		if (type == Wheel) buttons |= ((ev->wdy < 0) ? WheelDown : WheelUp);
+-
+-		if (ev->modifiers & (1 << KG_SHIFT)) buttons |= ShiftButton;
+-		if (ev->modifiers & (1 << KG_CTRL)) buttons |= ControlButton;
+-		if (ev->modifiers & ((1 << KG_ALT) | (1 << KG_ALTGR))) buttons |= AltButton;
+-
+-		s16 newx = (s16)x + ev->dx, newy =(s16)y + ev->dy;
+-		if (newx < 0) newx = 0;
+-		if (newy < 0) newy = 0;
+-		if (newx >= maxx) newx = maxx - 1;
+-		if (newy >= maxy) newy = maxy - 1;
+-		if (newx == x && newy == y && !(buttons & MouseButtonMask)) continue;
+-
+-		shell->mouseInput(newx, newy, type, buttons);
+-		x = newx;
+-		y = newy;
+-	}
++	if (ev->wdy) type = Wheel;
++	else if ((ev->type & GPM_MOVE) || (ev->type & GPM_DRAG)) type = Move;
++	else if (ev->type & GPM_DOWN) type = (ev->type & GPM_DOUBLE) ? DblClick : Press;
++	else if (ev->type & GPM_UP) type = Release;
++	if (type == -1) return;
++
++	if (ev->buttons & GPM_B_LEFT) buttons |= LeftButton;
++	if (ev->buttons & GPM_B_MIDDLE) buttons |= MidButton;
++	if (ev->buttons & GPM_B_RIGHT) buttons |= RightButton;
++	if (type == Wheel) buttons |= ((ev->wdy < 0) ? WheelDown : WheelUp);
++
++	// On release the event already shows the button as up, so
++	// report the state from just before it: SGR encoding needs
++	// to know which button was released. Then remember the
++	// new state for the next event.
++	s32 stateButtons = buttons;
++	if (type == Release) buttons = prevButtons;
++	prevButtons = stateButtons;
++
++	if (ev->modifiers & (1 << KG_SHIFT)) buttons |= ShiftButton;
++	if (ev->modifiers & (1 << KG_CTRL)) buttons |= ControlButton;
++	if (ev->modifiers & ((1 << KG_ALT) | (1 << KG_ALTGR))) buttons |= AltButton;
++
++	s16 newx = (s16)x + ev->dx, newy =(s16)y + ev->dy;
++	if (newx < 0) newx = 0;
++	if (newy < 0) newy = 0;
++	if (newx >= maxx) newx = maxx - 1;
++	if (newy >= maxy) newy = maxy - 1;
++	if (newx == x && newy == y && !(buttons & MouseButtonMask)) return;
++
++	shell->mouseInput(newx, newy, type, buttons);
++	x = newx;
++	y = newy;
+ }
+ 
+ void Mouse::switchVc(bool enter)
+ {
++	// Coming back to this console is a good moment to retry if an
++	// earlier reconnect failed (daemon restarted while away).
++	if (enter && fd() == -1 && connectGpm()) redrawScreen();
+ }
+ 
+ #else
+@@ -158,6 +249,8 @@
+ 
+ Mouse::Mouse()
+ {
++	evLen = 0;
++	reconnectPending = false;
+ }
+ 
+ Mouse::~Mouse()
+@@ -169,6 +262,10 @@
+ 	ioctl(STDIN_FILENO, KDSETMODE, enter ? KD_GRAPHICS : KD_TEXT);
+ }
+ 
++void Mouse::ioError(bool read, s32 err)
++{
++}
++
+ void Mouse::readyRead(s8 *buf, u32 len)
+ {
+ }
 diff -ruN '--exclude=Makefile.in' a/src/mouse.h b/src/mouse.h
 --- a/src/mouse.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/mouse.h	2026-11-19 03:17:47.120292757 +0000
-@@ -32,6 +32,7 @@
++++ b/src/mouse.h	2026-11-19 04:10:20.056471671 +0000
+@@ -24,14 +24,26 @@
+ #include "io.h"
+ #include "instance.h"
+ 
++class FbShell;
++struct Gpm_Event;
++
+ class Mouse : public IoPipe {
+ 	DECLARE_INSTANCE(Mouse)
+ public:
+ 	void switchVc(bool enter);
+ private:
  	virtual void readyRead(s8 *buf, u32 len);
++	virtual void ioError(bool read, s32 err);
++	bool connectGpm();
++	void redrawScreen();
++	void processEvent(FbShell *shell, Gpm_Event *ev);
++
++	bool reconnectPending;
++	s8 evBuf[64];
++	u32 evLen;
  
  	u16 x, y;
 +	u16 prevButtons; // buttons as they were before the last event
@@ -1879,7 +2112,7 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.h b/src/mouse.h
  #endif
 diff -ruN '--exclude=Makefile.in' a/src/screen.cpp b/src/screen.cpp
 --- a/src/screen.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen.cpp	2026-11-19 03:16:18.856292757 +0000
++++ b/src/screen.cpp	2026-11-19 04:08:50.036471671 +0000
 @@ -197,7 +197,7 @@
  	}
  }
@@ -1990,7 +2223,7 @@ diff -ruN '--exclude=Makefile.in' a/src/screen.cpp b/src/screen.cpp
  
 diff -ruN '--exclude=Makefile.in' a/src/screen.h b/src/screen.h
 --- a/src/screen.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen.h	2026-11-19 03:16:18.856292757 +0000
++++ b/src/screen.h	2026-11-19 04:08:50.036471671 +0000
 @@ -45,8 +45,8 @@
  	void rotateRect(u32 &x, u32 &y, u32 &w, u32 &h);
  	void rotatePoint(u32 w, u32 h, u32 &x, u32 &y);
@@ -2045,7 +2278,7 @@ diff -ruN '--exclude=Makefile.in' a/src/screen.h b/src/screen.h
  	drawFun draw;
 diff -ruN '--exclude=Makefile.in' a/src/screen_render.cpp b/src/screen_render.cpp
 --- a/src/screen_render.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen_render.cpp	2026-11-19 03:16:18.856292757 +0000
++++ b/src/screen_render.cpp	2026-11-19 04:08:50.036471671 +0000
 @@ -109,7 +109,7 @@
  	if (bgimage_mem) delete[] bgimage_mem;
  }
