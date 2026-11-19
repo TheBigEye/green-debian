@@ -412,6 +412,40 @@ sudo rm /usr/local/bin/fbterm-patched
 ./setup-fbterm-background.sh
 ```
 
+### Mouse inside FbTerm
+
+The mouse inside FbTerm goes through GPM, the same mouse server that
+draws the pointer on the login console. Two things are needed:
+
+1. The `gpm` package installed and running (you already see its
+   pointer on the login console, so this part is done).
+2. A patched FbTerm that was built with `libgpm-dev` installed.
+   Without that header, FbTerm's build quietly skips the mouse code
+   and no mouse ever works inside it. This was the case in older
+   builds. The setup script now installs `libgpm-dev`, refuses to
+   build without the mouse, and rebuilds an old mouse-less binary
+   on its own when you run it again.
+
+One thing that surprises people: there is no arrow pointer inside
+FbTerm. FbTerm never draws one, and GPM's own pointer belongs to the
+text console. The mouse still works. You see it as text selection
+when you drag over text, and programs that use the mouse (vim with
+`set mouse=a`, Midnight Commander, tmux) receive clicks, drags and
+the wheel. The patched FbTerm also understands the current mouse
+reporting modes (1002, 1003 and the SGR encoding 1006), which
+recent vim, Neovim and tmux versions expect.
+
+If you only want the new binary, without running the whole setup
+again and without touching your `~/.fbtermrc`, use:
+
+```sh
+./replace-fbterm-binary.sh          # build and swap the binary
+./replace-fbterm-binary.sh --check  # show what is installed now
+./replace-fbterm-binary.sh --restore  # put the previous binary back
+```
+
+The old binary is kept as `/usr/local/bin/fbterm-patched.bak`.
+
 ### Changing the wallpaper
 
 Once the setup is installed, use `set-fbterm-wallpaper.sh`:
