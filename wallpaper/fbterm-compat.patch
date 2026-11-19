@@ -1,6 +1,6 @@
-diff -ruN a/src/Makefile.am b/src/Makefile.am
+diff -ruN '--exclude=Makefile.in' a/src/Makefile.am b/src/Makefile.am
 --- a/src/Makefile.am	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/Makefile.am	2026-11-15 05:42:34.387213304 +0000
++++ b/src/Makefile.am	2026-11-19 03:16:18.856292757 +0000
 @@ -3,7 +3,7 @@
  bin_PROGRAMS = fbterm
  
@@ -10,9 +10,9 @@ diff -ruN a/src/Makefile.am b/src/Makefile.am
  	screen_render.cpp fbdev.cpp fbdev.h vesadev.cpp vesadev.h vbe.h
  EXTRA_fbterm_SOURCES = signalfd.h
  
-diff -ruN a/src/fbshell.cpp b/src/fbshell.cpp
+diff -ruN '--exclude=Makefile.in' a/src/fbshell.cpp b/src/fbshell.cpp
 --- a/src/fbshell.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/fbshell.cpp	2026-11-15 05:42:34.391213304 +0000
++++ b/src/fbshell.cpp	2026-11-19 03:16:18.856292757 +0000
 @@ -33,28 +33,35 @@
  #include "screen.h"
  #include "improxy.h"
@@ -118,9 +118,9 @@ diff -ruN a/src/fbshell.cpp b/src/fbshell.cpp
  
  		if (attr.bcolor > 8 && attr.bcolor < 16) attr.bcolor -= 8;
  	}
-diff -ruN a/src/input.cpp b/src/input.cpp
+diff -ruN '--exclude=Makefile.in' a/src/input.cpp b/src/input.cpp
 --- a/src/input.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/input.cpp	2026-11-15 05:42:34.391213304 +0000
++++ b/src/input.cpp	2026-11-19 03:16:18.856292757 +0000
 @@ -28,6 +28,7 @@
  #include <linux/input.h>
  #include "input.h"
@@ -292,9 +292,9 @@ diff -ruN a/src/input.cpp b/src/input.cpp
 +		ioctl(STDIN_FILENO, KDSETLED, leds);
 +	}
 +}
-diff -ruN a/src/input.h b/src/input.h
+diff -ruN '--exclude=Makefile.in' a/src/input.h b/src/input.h
 --- a/src/input.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/input.h	2026-11-15 05:42:34.391213304 +0000
++++ b/src/input.h	2026-11-19 03:16:18.856292757 +0000
 @@ -24,19 +24,34 @@
  #include "io.h"
  #include "instance.h"
@@ -330,9 +330,9 @@ diff -ruN a/src/input.h b/src/input.h
  };
  
  #endif
-diff -ruN a/src/kittykey.cpp b/src/kittykey.cpp
+diff -ruN '--exclude=Makefile.in' a/src/kittykey.cpp b/src/kittykey.cpp
 --- a/src/kittykey.cpp	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/kittykey.cpp	2026-11-15 05:42:34.391213304 +0000
++++ b/src/kittykey.cpp	2026-11-19 03:16:18.856292757 +0000
 @@ -0,0 +1,648 @@
 +/*
 + *   kittykey.cpp - kitty keyboard protocol encoder (see kittykey.h).
@@ -982,9 +982,9 @@ diff -ruN a/src/kittykey.cpp b/src/kittykey.cpp
 +	}
 +	return 0;
 +}
-diff -ruN a/src/kittykey.h b/src/kittykey.h
+diff -ruN '--exclude=Makefile.in' a/src/kittykey.h b/src/kittykey.h
 --- a/src/kittykey.h	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/kittykey.h	2026-11-15 05:42:34.391213304 +0000
++++ b/src/kittykey.h	2026-11-19 03:16:18.856292757 +0000
 @@ -0,0 +1,75 @@
 +/*
 + *   kittykey.h - kitty keyboard protocol encoder for FbTerm.
@@ -1061,9 +1061,84 @@ diff -ruN a/src/kittykey.h b/src/kittykey.h
 +};
 +
 +#endif
-diff -ruN a/src/lib/vterm.cpp b/src/lib/vterm.cpp
---- a/src/lib/vterm.cpp	2026-11-15 05:41:04.271213304 +0000
-+++ b/src/lib/vterm.cpp	2026-11-15 05:42:34.391213304 +0000
+diff -ruN '--exclude=Makefile.in' a/src/lib/shell.cpp b/src/lib/shell.cpp
+--- a/src/lib/shell.cpp	2010-10-18 08:20:11.000000000 +0000
++++ b/src/lib/shell.cpp	2026-11-19 03:17:40.264292757 +0000
+@@ -144,8 +144,9 @@
+ 	s32 btn = buttons & MouseButtonMask;
+ 	s32 modifies = buttons & ModifyButtonMask;
+ 	u16 rtype = mode(MouseReport);
++	bool sgr = mouseSGR();
+ 
+-	if (btn && rtype != Wheel && (rtype == MouseNone || (modifies & ShiftButton))) {
++	if (btn && type != Wheel && (rtype == MouseNone || (modifies & ShiftButton))) {
+ 		textSelect(x, y, type, btn);
+ 		return;
+ 	}
+@@ -153,6 +154,7 @@
+ 	if (rtype == MouseNone) return;
+ 
+ 	s32 val = -1;
++	bool release = false;
+ 
+ 	switch (type) {
+ 	case Press:
+@@ -162,10 +164,27 @@
+ 		else if (btn & RightButton) val = 2;
+ 		break;
+ 	case Release:
+-		if (rtype == MouseX11) val = 3;
++		// Legacy X11 encoding reports any release as 3; SGR says
++		// which button it was (the mouse layer reports the buttons
++		// as they were just before the release).
++		release = true;
++		if (sgr) {
++			if (btn & LeftButton) val = 0;
++			else if (btn & MidButton) val = 1;
++			else if (btn & RightButton) val = 2;
++		} else if (rtype != MouseX10) {
++			val = 3;
++		}
++		break;
++	case Move:
++		if (rtype == MouseAnyEvent) {
++			val = 32 + ((btn & LeftButton) ? 0 : (btn & MidButton) ? 1 : (btn & RightButton) ? 2 : 3);
++		} else if (rtype == MouseBtnEvent && btn) {
++			val = 32 + ((btn & LeftButton) ? 0 : (btn & MidButton) ? 1 : 2);
++		}
+ 		break;
+ 	case Wheel:
+-		if (rtype == MouseX11) {
++		if (rtype != MouseX10) {
+ 			val = 64;
+ 			if (btn & WheelDown) val |= 1;
+ 		}
+@@ -174,13 +193,20 @@
+ 		break;
+ 	}
+ 
+-	if (rtype == MouseX11 && val != -1) {
++	if (val == -1) return;
++
++	// X10 (mode 9) has no modifier encoding; the others do.
++	if (rtype != MouseX10) {
+ 		if (modifies & ShiftButton)	val |= 4;
+ 		if (modifies & AltButton) val |= 8;
+ 		if (modifies & ControlButton) val |= 16;
+ 	}
+ 
+-	if (val != -1) {
++	if (sgr) {
++		s8 buf[40];
++		snprintf(buf, sizeof(buf), "\e[<%d;%d;%d%c", val, x + 1, y + 1, release ? 'm' : 'M');
++		sendBack(buf);
++	} else {
+ 		s8 buf[8];
+ 		snprintf(buf, sizeof(buf), "\e[M%c%c%c", ' ' + val, ' ' + x + 1, ' ' + y + 1);
+ 		sendBack(buf);
+diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.cpp b/src/lib/vterm.cpp
+--- a/src/lib/vterm.cpp	2026-11-19 03:16:18.848292757 +0000
++++ b/src/lib/vterm.cpp	2026-11-19 03:16:18.856292757 +0000
 @@ -25,7 +25,7 @@
  #define MIN(a, b) ((a) < (b) ? (a) : (b))
  #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -1190,9 +1265,9 @@ diff -ruN a/src/lib/vterm.cpp b/src/lib/vterm.cpp
  	if (!history_lines || (absolute && num == (s32)visual_start_line) || (!absolute && !num)) return;
  
  	u32 bak_line = visual_start_line;
-diff -ruN a/src/lib/vterm.h b/src/lib/vterm.h
+diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
 --- a/src/lib/vterm.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/vterm.h	2026-11-15 05:42:34.391213304 +0000
++++ b/src/lib/vterm.h	2026-11-19 03:18:06.968292757 +0000
 @@ -32,7 +32,7 @@
  
  		bool operator != (const CharAttr a) {
@@ -1202,7 +1277,7 @@ diff -ruN a/src/lib/vterm.h b/src/lib/vterm.h
  		}
  
  		u16 fcolor : 8;
-@@ -42,6 +42,7 @@
+@@ -42,11 +42,12 @@
  		u16 underline : 1;
  		u16 blink : 1;
  		u16 reverse : 1;
@@ -1210,6 +1285,12 @@ diff -ruN a/src/lib/vterm.h b/src/lib/vterm.h
  		u16 type : 2;
  	};
  
+ 	typedef enum {
+-		MouseNone, MouseX11, MouseX10,
++		MouseNone, MouseX11, MouseX10, MouseBtnEvent, MouseAnyEvent,
+ 	} MouseReportType;
+ 
+ 	typedef enum {
 @@ -61,6 +62,7 @@
  		AutoRepeatKey = 16,
  		ApplicKeypad = 32,
@@ -1218,7 +1299,7 @@ diff -ruN a/src/lib/vterm.h b/src/lib/vterm.h
  		AllModes = 0xff,
  	} ModeType;
  
-@@ -77,6 +79,8 @@
+@@ -77,8 +79,11 @@
  
  	u16 w() { return width; }
  	u16 h() { return height; }
@@ -1226,8 +1307,11 @@ diff -ruN a/src/lib/vterm.h b/src/lib/vterm.h
 +	u8 kittyFlags() { return mKitty[alt_active ? 1 : 0].flags; }
  	void historyDisplay(bool absolute, s32 num);
  	u16 mode(ModeType type);
++	bool mouseSGR() { return mode_flags.mouse_sgr; }
  	void resize(u16 w, u16 h);
-@@ -100,6 +104,19 @@
+ 	void input(const u8 *buf, u32 count);
+ 	void expose(u16 x, u16 y, u16 w, u16 h);
+@@ -100,6 +105,19 @@
  	virtual void requestUpdate(u16 x, u16 y, u16 w, u16 h);
  
  private:
@@ -1247,7 +1331,15 @@ diff -ruN a/src/lib/vterm.h b/src/lib/vterm.h
  	// utility functions
  	void do_normal_char();
  	void do_control_char();
-@@ -167,6 +184,10 @@
+@@ -156,6 +174,7 @@
+ 	void set_mode();
+ 	void clear_mode();
+ 	void enable_mode(bool);
++	void updateMouseMode();
+ 	void set_display_attr();
+ 	void set_utf8();
+ 	void clear_utf8();
+@@ -167,6 +186,10 @@
  	u32 translate_char(u32);
  	void set_cursor_type();
  	void linux_specific();
@@ -1258,7 +1350,7 @@ diff -ruN a/src/lib/vterm.h b/src/lib/vterm.h
  	void begin_set_palette();
  	void set_palette();
  	void reset_palette();
-@@ -185,7 +206,7 @@
+@@ -185,7 +208,7 @@
  	static bool init_ambiguous_wide();
  
  	typedef enum {
@@ -1267,7 +1359,21 @@ diff -ruN a/src/lib/vterm.h b/src/lib/vterm.h
  	} EscapeState;
  
  	EscapeState esc_state;
-@@ -266,6 +287,15 @@
+@@ -251,7 +274,12 @@
+ 		u16 applic_keypad : 1;
+ 		u16 autorepeat_key : 1;
+ 		u16 cursorkey_esco : 1;
+-		u16 mouse_report : 2;
++		u16 mouse_report : 3;
++		u16 mouse_9 : 1;
++		u16 mouse_1000 : 1;
++		u16 mouse_1002 : 1;
++		u16 mouse_1003 : 1;
++		u16 mouse_sgr : 1;
+ 		u16 cursor_shape : 3;
+ 	} mode_flags;
+ 
+@@ -266,6 +294,15 @@
  	#define NPAR 16
  	u16 npar, param[NPAR];
  	bool q_mode, palette_mode;
@@ -1283,9 +1389,9 @@ diff -ruN a/src/lib/vterm.h b/src/lib/vterm.h
  
  	//history
  	static u16 history_lines;
-diff -ruN a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
+diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
 --- a/src/lib/vterm_action.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/vterm_action.cpp	2026-11-15 05:42:34.391213304 +0000
++++ b/src/lib/vterm_action.cpp	2026-11-19 03:17:40.128292757 +0000
 @@ -92,10 +92,64 @@
  {
  	q_mode = 0;
@@ -1449,8 +1555,23 @@ diff -ruN a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
  void VTerm::next_line()
  {
  	lf();
-@@ -399,54 +544,69 @@
+@@ -397,56 +542,95 @@
+ 	modeChanged(ApplicKeypad);
+ }
  
++/* The tracking modes are independent switches; the effective mode
++ * is the most capable one still enabled (1003 > 1002 > 1000 > 9).
++ * Mode 1006 is not a tracking mode: it only selects SGR encoding. */
++void VTerm::updateMouseMode()
++{
++	mode_flags.mouse_report = mode_flags.mouse_1003 ? MouseAnyEvent
++		: mode_flags.mouse_1002 ? MouseBtnEvent
++		: mode_flags.mouse_1000 ? MouseX11
++		: mode_flags.mouse_9 ? MouseX10
++		: MouseNone;
++	modeChanged(MouseReport);
++}
++
  void VTerm::enable_mode(bool enable)
  {
 -	switch (param[0] + 1000 * q_mode) {
@@ -1512,9 +1633,20 @@ diff -ruN a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
 +			mode_flags.autorepeat_key = enable;
 +			modeChanged(AutoRepeatKey);
 +			break;
-+		case 1009 :
-+			mode_flags.mouse_report = (enable ? MouseX10 : MouseNone);
-+			modeChanged(MouseReport);
++		case 1009 : // DECSET 9: X10 mouse tracking
++			mode_flags.mouse_9 = enable;
++			updateMouseMode();
++			break;
++		case 2002 : // DECSET 1002: button-event tracking
++			mode_flags.mouse_1002 = enable;
++			updateMouseMode();
++			break;
++		case 2003 : // DECSET 1003: any-event tracking
++			mode_flags.mouse_1003 = enable;
++			updateMouseMode();
++			break;
++		case 2006 : // DECSET 1006: SGR mouse encoding
++			mode_flags.mouse_sgr = enable;
 +			break;
 +		case 1025 :
 +			mode_flags.cursor_visible = enable;
@@ -1531,9 +1663,9 @@ diff -ruN a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
 +		case 2049 : // DECSET 1049: save cursor + alternate screen
 +			set_alt_screen(enable, true);
 +			break;
-+		case 2000 :
-+			mode_flags.mouse_report = (enable ? MouseX11 : MouseNone);
-+			modeChanged(MouseReport);
++		case 2000 : // DECSET 1000: normal mouse tracking
++			mode_flags.mouse_1000 = enable;
++			updateMouseMode();
 +			break;
 +		default:
 +			break;
@@ -1566,7 +1698,7 @@ diff -ruN a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
  	}
  }
  
-@@ -460,6 +620,25 @@
+@@ -460,6 +644,25 @@
  	enable_mode(false);
  }
  
@@ -1592,7 +1724,7 @@ diff -ruN a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
  void VTerm::set_display_attr()
  {
  	for (u16 n = 0; n <= npar; n++) {
-@@ -520,8 +699,21 @@
+@@ -520,8 +723,21 @@
  			char_attr.fcolor = param[n] % 10;
  			break;
  		case 38:
@@ -1616,7 +1748,7 @@ diff -ruN a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
  			break;
  		case 39:
  			char_attr.fcolor = cur_fcolor;
-@@ -529,9 +721,36 @@
+@@ -529,9 +745,36 @@
  			break;
  		case 40 ... 47:
  			char_attr.bcolor = param[n] % 10;
@@ -1653,7 +1785,7 @@ diff -ruN a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
  			break;
  		default :
  			break;
-@@ -689,7 +908,10 @@
+@@ -689,7 +932,10 @@
  		break;
  
  	case 2:
@@ -1665,9 +1797,9 @@ diff -ruN a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
  		break;
  
  	case 3:
-diff -ruN a/src/lib/vterm_states.cpp b/src/lib/vterm_states.cpp
---- a/src/lib/vterm_states.cpp	2026-11-15 05:41:04.271213304 +0000
-+++ b/src/lib/vterm_states.cpp	2026-11-15 05:42:34.391213304 +0000
+diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_states.cpp b/src/lib/vterm_states.cpp
+--- a/src/lib/vterm_states.cpp	2026-11-19 03:16:18.848292757 +0000
++++ b/src/lib/vterm_states.cpp	2026-11-19 03:16:18.856292757 +0000
 @@ -50,7 +50,8 @@
  
  	// ESesc
@@ -1708,9 +1840,46 @@ diff -ruN a/src/lib/vterm_states.cpp b/src/lib/vterm_states.cpp
 +	// ESignore
 +	{ 0xFFFF },
  };
-diff -ruN a/src/screen.cpp b/src/screen.cpp
+diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
+--- a/src/mouse.cpp	2010-10-18 08:20:11.000000000 +0000
++++ b/src/mouse.cpp	2026-11-19 03:17:47.380292757 +0000
+@@ -92,6 +92,7 @@
+ Mouse::Mouse()
+ {
+ 	x = y = 0;
++	prevButtons = 0;
+ }
+ 
+ Mouse::~Mouse()
+@@ -124,6 +125,14 @@
+ 		if (ev->buttons & GPM_B_RIGHT) buttons |= RightButton;
+ 		if (type == Wheel) buttons |= ((ev->wdy < 0) ? WheelDown : WheelUp);
+ 
++		// On release the event already shows the button as up, so
++		// report the state from just before it: SGR encoding needs
++		// to know which button was released. Then remember the
++		// new state for the next event.
++		s32 stateButtons = buttons;
++		if (type == Release) buttons = prevButtons;
++		prevButtons = stateButtons;
++
+ 		if (ev->modifiers & (1 << KG_SHIFT)) buttons |= ShiftButton;
+ 		if (ev->modifiers & (1 << KG_CTRL)) buttons |= ControlButton;
+ 		if (ev->modifiers & ((1 << KG_ALT) | (1 << KG_ALTGR))) buttons |= AltButton;
+diff -ruN '--exclude=Makefile.in' a/src/mouse.h b/src/mouse.h
+--- a/src/mouse.h	2010-10-18 08:20:11.000000000 +0000
++++ b/src/mouse.h	2026-11-19 03:17:47.120292757 +0000
+@@ -32,6 +32,7 @@
+ 	virtual void readyRead(s8 *buf, u32 len);
+ 
+ 	u16 x, y;
++	u16 prevButtons; // buttons as they were before the last event
+ };
+ 
+ #endif
+diff -ruN '--exclude=Makefile.in' a/src/screen.cpp b/src/screen.cpp
 --- a/src/screen.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen.cpp	2026-11-15 05:42:34.391213304 +0000
++++ b/src/screen.cpp	2026-11-19 03:16:18.856292757 +0000
 @@ -197,7 +197,7 @@
  	}
  }
@@ -1819,9 +1988,9 @@ diff -ruN a/src/screen.cpp b/src/screen.cpp
  	}
  }
  
-diff -ruN a/src/screen.h b/src/screen.h
+diff -ruN '--exclude=Makefile.in' a/src/screen.h b/src/screen.h
 --- a/src/screen.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen.h	2026-11-15 05:42:34.391213304 +0000
++++ b/src/screen.h	2026-11-19 03:16:18.856292757 +0000
 @@ -45,8 +45,8 @@
  	void rotateRect(u32 &x, u32 &y, u32 &w, u32 &h);
  	void rotatePoint(u32 w, u32 h, u32 &x, u32 &y);
@@ -1874,9 +2043,9 @@ diff -ruN a/src/screen.h b/src/screen.h
  
  	fillFun fill;
  	drawFun draw;
-diff -ruN a/src/screen_render.cpp b/src/screen_render.cpp
+diff -ruN '--exclude=Makefile.in' a/src/screen_render.cpp b/src/screen_render.cpp
 --- a/src/screen_render.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen_render.cpp	2026-11-15 05:42:34.391213304 +0000
++++ b/src/screen_render.cpp	2026-11-19 03:16:18.856292757 +0000
 @@ -109,7 +109,7 @@
  	if (bgimage_mem) delete[] bgimage_mem;
  }

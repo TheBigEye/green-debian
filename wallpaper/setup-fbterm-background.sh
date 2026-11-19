@@ -215,11 +215,19 @@ ensure_keymap_cap() {
 build_patched() (
     DEST="$DEST_PATCHED"
     DO_APT=$USE_APT
-    if [ -x "$DEST" ] && "$DEST" -V 2>/dev/null | grep -q 'FbTerm version 1.7'; then
+    # A binary built without libgpm-dev runs fine but has no mouse:
+    # configure silently disables GPM when gpm.h is missing. Only
+    # skip the build when the installed binary really has mouse
+    # support (the GPM build contains the /dev/gpmctl path).
+    if [ -x "$DEST" ] && "$DEST" -V 2>/dev/null | grep -q 'FbTerm version 1.7' \
+       && grep -a -q '/dev/gpmctl' "$DEST" 2>/dev/null; then
         echo "Patched FbTerm already installed and working: $DEST"
         echo "Skipping the build. To force a rebuild (e.g. after a"
         echo "patch update), remove it first:  sudo rm $DEST"
         exit 0
+    fi
+    if [ -x "$DEST" ]; then
+        echo "Existing $DEST has no GPM mouse support; rebuilding it."
     fi
     fail() { echo "setup (patched fbterm): $*" >&2; exit 1; }
     have_cmd() { command -v "$1" >/dev/null 2>&1; }
@@ -267,6 +275,14 @@ build_patched() (
         pick_dev_pkg fontconfig libfontconfig1-dev libfontconfig-dev
         pick_dev_pkg freetype2 libfreetype-dev libfreetype6-dev
     fi
+
+    # gpm.h (libgpm-dev) decides whether the mouse works inside
+    # FbTerm; without it configure quietly builds a mouse-less
+    # binary. The runtime also needs the gpm daemon itself.
+    if [ ! -f /usr/include/gpm.h ]; then
+        missing_pkgs="$missing_pkgs libgpm-dev"
+    fi
+    [ -x /usr/sbin/gpm ] || have_cmd gpm || missing_pkgs="$missing_pkgs gpm"
 
     if [ -n "$missing_pkgs" ]; then
         if [ "$DO_APT" -eq 1 ]; then
@@ -351,11 +367,13 @@ build_patched() (
     (
         cd "$SRC_DIR" || exit 1
         autoreconf -fi >/dev/null 2>&1 || exit 1
-        ./configure >"$WORK_DIR/configure.log" 2>&1 || { cat "$WORK_DIR/configure.log"; exit 1; }
+        ./configure --enable-gpm >"$WORK_DIR/configure.log" 2>&1 || { cat "$WORK_DIR/configure.log"; exit 1; }
         make -j"$(nproc 2>/dev/null || echo 2)" >"$WORK_DIR/make.log" 2>&1 || { tail -n 30 "$WORK_DIR/make.log"; exit 1; }
     ) || fail "build failed (see messages above)"
 
     [ -x "$SRC_DIR/src/fbterm" ] || fail "build finished but src/fbterm is missing"
+    grep -a -q '/dev/gpmctl' "$SRC_DIR/src/fbterm" \
+        || fail "the built fbterm has no GPM mouse support (is libgpm-dev installed?)"
 
     # --- Install ----------------------------------------------------------------------
     echo "Installing $DEST"
@@ -526,6 +544,11 @@ verify_install() {
             v_bad "$DEST_PATCHED has unresolved shared libraries"
         else
             v_ok "patched fbterm installed and runs ($DEST_PATCHED)"
+        fi
+        if grep -a -q '/dev/gpmctl' "$DEST_PATCHED" 2>/dev/null; then
+            v_ok "patched fbterm has GPM mouse support"
+        else
+            v_bad "patched fbterm was built without GPM (no mouse inside FbTerm; rebuild with libgpm-dev installed)"
         fi
     else
         v_bad "patched fbterm missing or not working ($DEST_PATCHED)"
