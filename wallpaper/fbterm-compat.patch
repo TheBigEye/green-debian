@@ -1,6 +1,6 @@
 diff -ruN '--exclude=Makefile.in' a/src/Makefile.am b/src/Makefile.am
 --- a/src/Makefile.am	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/Makefile.am	2026-11-19 04:08:50.036471671 +0000
++++ b/src/Makefile.am	2026-11-20 02:12:31.740347992 +0000
 @@ -3,7 +3,7 @@
  bin_PROGRAMS = fbterm
  
@@ -12,7 +12,7 @@ diff -ruN '--exclude=Makefile.in' a/src/Makefile.am b/src/Makefile.am
  
 diff -ruN '--exclude=Makefile.in' a/src/fbshell.cpp b/src/fbshell.cpp
 --- a/src/fbshell.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/fbshell.cpp	2026-11-19 04:08:50.036471671 +0000
++++ b/src/fbshell.cpp	2026-11-20 02:16:37.336347992 +0000
 @@ -33,28 +33,35 @@
  #include "screen.h"
  #include "improxy.h"
@@ -94,7 +94,18 @@ diff -ruN '--exclude=Makefile.in' a/src/fbshell.cpp b/src/fbshell.cpp
  	if (type & (CursorKeyEscO | ApplicKeypad | CRWithLF)) {
  		reportMode();
  	}
-@@ -660,7 +673,7 @@
+@@ -552,6 +565,10 @@
+ 
+ void FbShell::switchVt(bool enter, FbShell *peer)
+ {
++	// DECSET 1004: tell the app when it gains or loses the
++	// console (shell tab switch or VT switch).
++	if (focusEvents()) focusInput(enter);
++
+ 	if (tty0_fd == -1) tty0_fd = open("/dev/tty0", O_RDWR);
+ 	if (tty0_fd != -1) {
+ 		seteuid(0);
+@@ -660,7 +677,7 @@
  		u16 code = charCode(x, y);
  
  		if (attr.type == CharAttr::DoubleRight) x--;
@@ -103,7 +114,7 @@ diff -ruN '--exclude=Makefile.in' a/src/fbshell.cpp b/src/fbshell.cpp
  
  		mMousePointer.x = x;
  		mMousePointer.y = y;
-@@ -700,13 +713,13 @@
+@@ -700,13 +717,13 @@
  	else if (attr.underline) attr.fcolor = 6; // cyan
  	else if (attr.intensity == 0) attr.fcolor = 8; // gray
  
@@ -118,9 +129,35 @@ diff -ruN '--exclude=Makefile.in' a/src/fbshell.cpp b/src/fbshell.cpp
  
  		if (attr.bcolor > 8 && attr.bcolor < 16) attr.bcolor -= 8;
  	}
+diff -ruN '--exclude=Makefile.in' a/src/fbterm.cpp b/src/fbterm.cpp
+--- a/src/fbterm.cpp	2010-10-18 08:20:11.000000000 +0000
++++ b/src/fbterm.cpp	2026-11-20 02:16:20.268347992 +0000
+@@ -110,6 +110,14 @@
+ 
+ void FbTerm::init()
+ {
++	// Take the mouse first: while no client is connected, the
++	// gpm daemon draws its own pointer with the kernel text
++	// selection, and on a framebuffer console that repaints
++	// cells from the text buffer. With a background image those
++	// cells would be captured into the wallpaper snapshot
++	// (black trails) by Screen creation below.
++	Mouse::instance();
++
+ 	if (!TtyInput::instance() || !Screen::instance()) return;
+ 
+ 	struct vt_mode vtm;
+@@ -145,7 +153,6 @@
+ #endif
+ 	signal(SIGPIPE, SIG_IGN);
+ 
+-	Mouse::instance();
+ 	mInit = true;
+ }
+ 
 diff -ruN '--exclude=Makefile.in' a/src/input.cpp b/src/input.cpp
 --- a/src/input.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/input.cpp	2026-11-19 04:08:50.036471671 +0000
++++ b/src/input.cpp	2026-11-20 02:12:31.740347992 +0000
 @@ -28,6 +28,7 @@
  #include <linux/input.h>
  #include "input.h"
@@ -294,7 +331,7 @@ diff -ruN '--exclude=Makefile.in' a/src/input.cpp b/src/input.cpp
 +}
 diff -ruN '--exclude=Makefile.in' a/src/input.h b/src/input.h
 --- a/src/input.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/input.h	2026-11-19 04:08:50.036471671 +0000
++++ b/src/input.h	2026-11-20 02:12:31.740347992 +0000
 @@ -24,19 +24,34 @@
  #include "io.h"
  #include "instance.h"
@@ -332,7 +369,7 @@ diff -ruN '--exclude=Makefile.in' a/src/input.h b/src/input.h
  #endif
 diff -ruN '--exclude=Makefile.in' a/src/kittykey.cpp b/src/kittykey.cpp
 --- a/src/kittykey.cpp	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/kittykey.cpp	2026-11-19 04:08:50.036471671 +0000
++++ b/src/kittykey.cpp	2026-11-20 02:12:31.740347992 +0000
 @@ -0,0 +1,648 @@
 +/*
 + *   kittykey.cpp - kitty keyboard protocol encoder (see kittykey.h).
@@ -984,7 +1021,7 @@ diff -ruN '--exclude=Makefile.in' a/src/kittykey.cpp b/src/kittykey.cpp
 +}
 diff -ruN '--exclude=Makefile.in' a/src/kittykey.h b/src/kittykey.h
 --- a/src/kittykey.h	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/kittykey.h	2026-11-19 04:08:50.036471671 +0000
++++ b/src/kittykey.h	2026-11-20 02:12:31.740347992 +0000
 @@ -0,0 +1,75 @@
 +/*
 + *   kittykey.h - kitty keyboard protocol encoder for FbTerm.
@@ -1063,7 +1100,7 @@ diff -ruN '--exclude=Makefile.in' a/src/kittykey.h b/src/kittykey.h
 +#endif
 diff -ruN '--exclude=Makefile.in' a/src/lib/shell.cpp b/src/lib/shell.cpp
 --- a/src/lib/shell.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/shell.cpp	2026-11-19 04:08:50.036471671 +0000
++++ b/src/lib/shell.cpp	2026-11-20 02:16:11.808347992 +0000
 @@ -144,8 +144,9 @@
  	s32 btn = buttons & MouseButtonMask;
  	s32 modifies = buttons & ModifyButtonMask;
@@ -1083,7 +1120,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/shell.cpp b/src/lib/shell.cpp
  
  	switch (type) {
  	case Press:
-@@ -162,10 +164,27 @@
+@@ -162,25 +164,51 @@
  		else if (btn & RightButton) val = 2;
  		break;
  	case Release:
@@ -1112,8 +1149,11 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/shell.cpp b/src/lib/shell.cpp
 +		if (rtype != MouseX10) {
  			val = 64;
  			if (btn & WheelDown) val |= 1;
++			else if (btn & WheelLeft) val |= 2;
++			else if (btn & WheelRight) val |= 3;
  		}
-@@ -174,13 +193,20 @@
+ 		break;
+ 	default:
  		break;
  	}
  
@@ -1136,9 +1176,74 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/shell.cpp b/src/lib/shell.cpp
  		s8 buf[8];
  		snprintf(buf, sizeof(buf), "\e[M%c%c%c", ' ' + val, ' ' + x + 1, ' ' + y + 1);
  		sendBack(buf);
+@@ -401,10 +429,35 @@
+ void Shell::putSelectedText()
+ {
+ 	if (mSelText.text) {
++		// Apps that asked for bracketed paste (vim, fish, nano)
++		// must be able to tell a paste from typing.
++		if (bracketedPaste()) sendBack("\e[200~");
+ 		sendBack(mSelText.text);
++		if (bracketedPaste()) sendBack("\e[201~");
+ 	}
+ }
+ 
++void Shell::focusInput(bool in)
++{
++	sendBack(in ? "\e[I" : "\e[O");
++}
++
++void Shell::setAppSelection(const s8 *text)
++{
++	if (!text) {
++		mSelText.setText(0);
++		return;
++	}
++	s8 *copy = new s8[strlen(text) + 1];
++	strcpy(copy, text);
++	mSelText.setText(copy);
++}
++
++const s8 *Shell::appSelection()
++{
++	return mSelText.text;
++}
++
+ void Shell::inverseTextColor(u32 start, u32 end)
+ {
+ 	SWAP(start, end);
+diff -ruN '--exclude=Makefile.in' a/src/lib/shell.h b/src/lib/shell.h
+--- a/src/lib/shell.h	2010-10-18 08:20:11.000000000 +0000
++++ b/src/lib/shell.h	2026-11-20 02:16:11.808347992 +0000
+@@ -33,6 +33,8 @@
+ 	MidButton	= 0x0004,
+ 	WheelDown	= 0x0008,
+ 	WheelUp		= 0x0010,
++	WheelLeft	= 0x0020,
++	WheelRight	= 0x0040,
+ 	MouseButtonMask = 0x00ff,
+ 
+ 	ShiftButton	= 0x0100,
+@@ -45,6 +47,7 @@
+ public:
+ 	void keyInput(s8 *buf, u32 len);
+ 	void mouseInput(u16 x, u16 y, s32 type, s32 buttons);
++	void focusInput(bool in);
+ 
+ protected:
+ 	Shell();
+@@ -60,6 +63,8 @@
+ private:
+ 	static void initWordChars(s8 *buf, u32 len);
+ 	virtual void sendBack(const s8 *data);
++	virtual void setAppSelection(const s8 *text);
++	virtual const s8 *appSelection();
+ 
+ 	void textSelect(u16 x, u16 y, s32 type, s32 buttons);
+ 	void startTextSelect(u16 x, u16 y);
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.cpp b/src/lib/vterm.cpp
---- a/src/lib/vterm.cpp	2026-11-19 04:08:50.028471671 +0000
-+++ b/src/lib/vterm.cpp	2026-11-19 04:08:50.036471671 +0000
+--- a/src/lib/vterm.cpp	2026-11-20 02:12:31.732347992 +0000
++++ b/src/lib/vterm.cpp	2026-11-20 02:15:53.208347992 +0000
 @@ -25,7 +25,7 @@
  #define MIN(a, b) ((a) < (b) ? (a) : (b))
  #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -1188,7 +1293,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.cpp b/src/lib/vterm.cpp
  
  	pending_scroll = 0;
  	scroll_top = 0;
-@@ -469,6 +481,42 @@
+@@ -469,6 +481,56 @@
  
  void VTerm::do_control_char()
  {
@@ -1211,18 +1316,32 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.cpp b/src/lib/vterm.cpp
 +	 * OSC 52 clipboard data, window titles, ...) is silently
 +	 * dropped, as other terminals do with unknown OSC sequences. */
 +	if (esc_state == ESosc) {
-+		if (cur_char == 0x07 || cur_char == 0x18 || cur_char == 0x1A) {
++		if (osc_st) {
++			osc_st = false;
++			if (cur_char == '\\') { // ST: ESC \ ends the string
++				finish_osc();
++				esc_state = ESnormal;
++				return;
++			}
++			esc_state = ESesc; // aborted OSC: handle as a fresh ESC
++		} else if (cur_char == 0x07 || cur_char == 0x18 || cur_char == 0x1A) {
++			finish_osc();
 +			esc_state = ESnormal;
 +			return;
-+		}
-+		if (cur_char != 0x1B) {
++		} else if (cur_char == 0x1B) {
++			osc_st = true;
++			return;
++		} else {
 +			if (osc_first) {
 +				osc_first = false;
-+				if (cur_char == 'P' || cur_char == 'R')
-+					esc_state = ESnonstd;
-+				else
++				if (cur_char == 'P' || cur_char == 'R') {
++					esc_state = ESnonstd; // palette: legacy path below
++				} else {
++					if (osc_len < OSC_BUF_SIZE) osc_buf[osc_len++] = cur_char;
 +					return;
++				}
 +			} else {
++				if (osc_len < OSC_BUF_SIZE) osc_buf[osc_len++] = cur_char;
 +				return;
 +			}
 +		}
@@ -1231,7 +1350,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.cpp b/src/lib/vterm.cpp
  	u8 index = (cur_char < MAX_CONTROL_CODE ? control_map[cur_char] : 0);
  	const Sequence *seq = control_sequences + index;
  
-@@ -476,6 +524,16 @@
+@@ -476,6 +538,16 @@
  		seq = escape_sequences + (cur_char < MAX_ESCAPE_CODE ? escape_map[esc_state][cur_char] : 0);
  	}
  
@@ -1248,7 +1367,18 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.cpp b/src/lib/vterm.cpp
  	if (seq->action) (this->*(seq->action))();
  	if (seq->next != ESkeep) esc_state = seq->next;
  }
-@@ -608,7 +666,7 @@
+@@ -484,6 +556,10 @@
+ {
+ 	if (!width) return;
+ 
++	// DECSET 2026: the application is drawing a frame; keep the
++	// dirty marks and the pending scroll, show nothing yet.
++	if (mode_flags.sync_update) return;
++
+ 	// first perform scroll-copy
+ 	s32 mx = scroll_bot - scroll_top + 1;
+ 	if (pending_scroll && pending_scroll< mx && -pending_scroll < mx) {
+@@ -608,7 +684,7 @@
  	if (num > mx) num = mx;
  	if (-num > mx) num = -mx;
  
@@ -1257,7 +1387,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.cpp b/src/lib/vterm.cpp
  		history_scroll(num);
  	}
  
-@@ -778,6 +836,7 @@
+@@ -778,6 +854,7 @@
  
  void VTerm::historyDisplay(bool absolute, s32 num)
  {
@@ -1265,9 +1395,84 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.cpp b/src/lib/vterm.cpp
  	if (!history_lines || (absolute && num == (s32)visual_start_line) || (!absolute && !num)) return;
  
  	u32 bak_line = visual_start_line;
+@@ -832,3 +909,74 @@
+ 
+ 	return ((history_full ? history_save_line : 0) + line) % history_lines;
+ }
++
++static s8 b64_val(s8 c)
++{
++	if (c >= 'A' && c <= 'Z') return c - 'A';
++	if (c >= 'a' && c <= 'z') return c - 'a' + 26;
++	if (c >= '0' && c <= '9') return c - '0' + 52;
++	if (c == '+') return 62;
++	if (c == '/') return 63;
++	return -1;
++}
++
++/* OSC 52: an application (vim, tmux, ...) sets or asks for the
++ * terminal selection. On a text console there is no system
++ * clipboard; the selection is FbTerm's own, the one middle-click
++ * pastes. Only the payload after "52;<target>;" matters here. */
++void VTerm::finish_osc()
++{
++	osc_buf[osc_len] = 0;
++
++	if (osc_len < 4 || memcmp(osc_buf, "52;", 3)) return;
++
++	s8 *data = strchr(osc_buf + 3, ';');
++	if (!data) return;
++	data++;
++
++	if (!strcmp(data, "?")) {
++		static const s8 hexd[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
++		const s8 *sel = appSelection();
++		if (!sel) sel = (const s8 *)"";
++
++		u32 len = strlen(sel);
++		s8 *enc = new s8[(len + 2) / 3 * 4 + 1];
++		u32 i, o = 0;
++		for (i = 0; i < len; i += 3) {
++			u32 v = (u8)sel[i] << 16;
++			u32 n = 1;
++			if (i + 1 < len) { v |= (u8)sel[i + 1] << 8; n = 2; }
++			if (i + 2 < len) { v |= (u8)sel[i + 2]; n = 3; }
++			enc[o++] = hexd[(v >> 18) & 63];
++			enc[o++] = hexd[(v >> 12) & 63];
++			enc[o++] = n > 1 ? hexd[(v >> 6) & 63] : '=';
++			enc[o++] = n > 2 ? hexd[v & 63] : '=';
++		}
++		enc[o] = 0;
++
++		sendBack("\e]52;c;");
++		sendBack(enc);
++		sendBack("\a");
++		delete[] enc;
++		return;
++	}
++
++	// decode in place (decoded text is never longer than base64)
++	s8 *out = osc_buf;
++	u32 o = 0;
++	s32 v = 0;
++	s32 bits = 0;
++	for (s8 *p = data; *p; p++) {
++		if (*p == '=') break;
++		s8 d = b64_val(*p);
++		if (d < 0) continue;
++		v = (v << 6) | d;
++		bits += 6;
++		if (bits >= 8) {
++			bits -= 8;
++			out[o++] = (v >> bits) & 0xff;
++		}
++	}
++	out[o] = 0;
++	setAppSelection(out);
++}
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
 --- a/src/lib/vterm.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/vterm.h	2026-11-19 04:08:50.036471671 +0000
++++ b/src/lib/vterm.h	2026-11-20 02:16:11.808347992 +0000
 @@ -32,7 +32,7 @@
  
  		bool operator != (const CharAttr a) {
@@ -1299,7 +1504,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
  		AllModes = 0xff,
  	} ModeType;
  
-@@ -77,8 +79,11 @@
+@@ -77,8 +79,13 @@
  
  	u16 w() { return width; }
  	u16 h() { return height; }
@@ -1308,10 +1513,20 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
  	void historyDisplay(bool absolute, s32 num);
  	u16 mode(ModeType type);
 +	bool mouseSGR() { return mode_flags.mouse_sgr; }
++	bool bracketedPaste() { return mode_flags.bracketed_paste; }
++	bool focusEvents() { return mode_flags.focus_event; }
  	void resize(u16 w, u16 h);
  	void input(const u8 *buf, u32 count);
  	void expose(u16 x, u16 y, u16 w, u16 h);
-@@ -100,6 +105,19 @@
+@@ -94,12 +101,27 @@
+ 	virtual bool moveChars(u16 sx, u16 sy, u16 dx, u16 dy, u16 w, u16 h) { return false; }
+ 	virtual void drawCursor(CharAttr attr, u16 x, u16 y, u16 c) {}
+ 	virtual void sendBack(const s8 *data) {}
++	virtual void setAppSelection(const s8 *text) {}
++	virtual const s8 *appSelection() { return 0; }
+ 	virtual void modeChanged(ModeType type) {}
+ 	virtual void historyChanged(u32 cur, u32 total) {}
+ 	virtual void request(RequestType type, u32 val = 0) {}
  	virtual void requestUpdate(u16 x, u16 y, u16 w, u16 h);
  
  private:
@@ -1331,7 +1546,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
  	// utility functions
  	void do_normal_char();
  	void do_control_char();
-@@ -156,6 +174,7 @@
+@@ -156,6 +178,7 @@
  	void set_mode();
  	void clear_mode();
  	void enable_mode(bool);
@@ -1339,7 +1554,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
  	void set_display_attr();
  	void set_utf8();
  	void clear_utf8();
-@@ -167,6 +186,10 @@
+@@ -167,6 +190,10 @@
  	u32 translate_char(u32);
  	void set_cursor_type();
  	void linux_specific();
@@ -1350,7 +1565,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
  	void begin_set_palette();
  	void set_palette();
  	void reset_palette();
-@@ -185,7 +208,7 @@
+@@ -185,7 +212,7 @@
  	static bool init_ambiguous_wide();
  
  	typedef enum {
@@ -1359,7 +1574,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
  	} EscapeState;
  
  	EscapeState esc_state;
-@@ -251,7 +274,12 @@
+@@ -251,7 +278,15 @@
  		u16 applic_keypad : 1;
  		u16 autorepeat_key : 1;
  		u16 cursorkey_esco : 1;
@@ -1370,14 +1585,24 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
 +		u16 mouse_1002 : 1;
 +		u16 mouse_1003 : 1;
 +		u16 mouse_sgr : 1;
++		u16 bracketed_paste : 1;
++		u16 focus_event : 1;
++		u16 sync_update : 1;
  		u16 cursor_shape : 3;
  	} mode_flags;
  
-@@ -266,6 +294,15 @@
+@@ -266,6 +301,22 @@
  	#define NPAR 16
  	u16 npar, param[NPAR];
  	bool q_mode, palette_mode;
 +	bool osc_first; // true until the first char of an OSC sequence is seen
++	// OSC payload capture (OSC 52 selection access); other OSC
++	// sequences are collected and dropped as before.
++	static const u32 OSC_BUF_SIZE = 16384;
++	s8 osc_buf[OSC_BUF_SIZE + 1];
++	u32 osc_len;
++	bool osc_st; // an ESC inside OSC waits for the '\' of ST
++	void finish_osc();
 +
 +	// alternate screen (DECSET 47/1047/1048/1049): snapshot of the
 +	// main screen, restored when the alternate screen is left
@@ -1391,8 +1616,8 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
  	static u16 history_lines;
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
 --- a/src/lib/vterm_action.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/vterm_action.cpp	2026-11-19 04:08:50.036471671 +0000
-@@ -92,10 +92,64 @@
++++ b/src/lib/vterm_action.cpp	2026-11-20 02:15:53.208347992 +0000
+@@ -92,10 +92,66 @@
  {
  	q_mode = 0;
  	palette_mode = 0;
@@ -1452,12 +1677,14 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_act
 +{
 +	clear_param();
 +	osc_first = true;
++	osc_len = 0;
++	osc_st = false;
 +}
 +
  void VTerm::save_cursor()
  {
  	s_g0_charset = g0_charset;
-@@ -118,6 +172,97 @@
+@@ -118,6 +174,97 @@
  	move_cursor(s_cursor_x, s_cursor_y);
  }
  
@@ -1555,7 +1782,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_act
  void VTerm::next_line()
  {
  	lf();
-@@ -397,56 +542,95 @@
+@@ -397,56 +544,104 @@
  	modeChanged(ApplicKeypad);
  }
  
@@ -1648,6 +1875,15 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_act
 +		case 2006 : // DECSET 1006: SGR mouse encoding
 +			mode_flags.mouse_sgr = enable;
 +			break;
++		case 2004 : // DECSET 1004: focus in/out events
++			mode_flags.focus_event = enable;
++			break;
++		case 3004 : // DECSET 2004: bracketed paste
++			mode_flags.bracketed_paste = enable;
++			break;
++		case 3026 : // DECSET 2026: synchronized updates
++			mode_flags.sync_update = enable;
++			break;
 +		case 1025 :
 +			mode_flags.cursor_visible = enable;
 +			modeChanged(CursorVisible);
@@ -1698,7 +1934,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_act
  	}
  }
  
-@@ -460,6 +644,25 @@
+@@ -460,6 +655,25 @@
  	enable_mode(false);
  }
  
@@ -1724,7 +1960,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_act
  void VTerm::set_display_attr()
  {
  	for (u16 n = 0; n <= npar; n++) {
-@@ -520,8 +723,21 @@
+@@ -520,8 +734,21 @@
  			char_attr.fcolor = param[n] % 10;
  			break;
  		case 38:
@@ -1748,7 +1984,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_act
  			break;
  		case 39:
  			char_attr.fcolor = cur_fcolor;
-@@ -529,9 +745,36 @@
+@@ -529,9 +756,36 @@
  			break;
  		case 40 ... 47:
  			char_attr.bcolor = param[n] % 10;
@@ -1785,7 +2021,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_act
  			break;
  		default :
  			break;
-@@ -689,7 +932,10 @@
+@@ -689,7 +943,10 @@
  		break;
  
  	case 2:
@@ -1798,8 +2034,8 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_act
  
  	case 3:
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_states.cpp b/src/lib/vterm_states.cpp
---- a/src/lib/vterm_states.cpp	2026-11-19 04:08:50.028471671 +0000
-+++ b/src/lib/vterm_states.cpp	2026-11-19 04:08:50.036471671 +0000
+--- a/src/lib/vterm_states.cpp	2026-11-20 02:12:31.732347992 +0000
++++ b/src/lib/vterm_states.cpp	2026-11-20 02:12:31.740347992 +0000
 @@ -50,7 +50,8 @@
  
  	// ESesc
@@ -1842,7 +2078,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_states.cpp b/src/lib/vterm_sta
  };
 diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
 --- a/src/mouse.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/mouse.cpp	2026-11-19 04:10:23.764471671 +0000
++++ b/src/mouse.cpp	2026-11-20 02:16:20.268347992 +0000
 @@ -32,6 +32,7 @@
  #include <sys/types.h>
  #include <sys/socket.h>
@@ -1868,7 +2104,7 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
  {
  	Gpm_Connect conn;
  	conn.eventMask = ~0;
-@@ -81,17 +83,73 @@
+@@ -81,17 +83,74 @@
  	conn.minMod = 0;
  
  	s32 fd = open_gpm(&conn);
@@ -1941,10 +2177,11 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
 +	prevButtons = 0;
 +	evLen = 0;
 +	reconnectPending = false;
++	posSync = true;
  }
  
  Mouse::~Mouse()
-@@ -100,49 +158,82 @@
+@@ -100,49 +159,100 @@
  
  void Mouse::readyRead(s8 *buf, u32 len)
  {
@@ -1965,7 +2202,6 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
  	FbShell *shell = FbShellManager::instance()->activeShell();
 -	if (!shell) return;
  
--	u16 maxx = Screen::instance()->cols(), maxy = Screen::instance()->rows();
 +	while (len) {
 +		u32 need = sizeof(Gpm_Event) - evLen;
 +		u32 take = len < need ? len : need;
@@ -1980,16 +2216,30 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
 +		}
 +	}
 +}
++
++void Mouse::processEvent(FbShell *shell, Gpm_Event *ev)
++{
+ 	u16 maxx = Screen::instance()->cols(), maxy = Screen::instance()->rows();
  
 -	len /= sizeof(Gpm_Event);
 -	Gpm_Event *ev = (Gpm_Event *)buf;
-+void Mouse::processEvent(FbShell *shell, Gpm_Event *ev)
-+{
-+	u16 maxx = Screen::instance()->cols(), maxy = Screen::instance()->rows();
++	s32 type = -1, buttons = 0;
  
 -	for (; len--; ev++) {
 -		s32 type = -1, buttons = 0;
-+	s32 type = -1, buttons = 0;
++	if (ev->wdy || ev->wdx) type = Wheel;
++	else if ((ev->type & GPM_MOVE) || (ev->type & GPM_DRAG)) type = Move;
++	else if (ev->type & GPM_DOWN) type = (ev->type & GPM_DOUBLE) ? DblClick : Press;
++	else if (ev->type & GPM_UP) type = Release;
++	if (type == -1) return;
++
++	if (ev->buttons & GPM_B_LEFT) buttons |= LeftButton;
++	if (ev->buttons & GPM_B_MIDDLE) buttons |= MidButton;
++	if (ev->buttons & GPM_B_RIGHT) buttons |= RightButton;
++	if (type == Wheel) {
++		if (ev->wdy) buttons |= ((ev->wdy < 0) ? WheelDown : WheelUp);
++		if (ev->wdx) buttons |= ((ev->wdx < 0) ? WheelLeft : WheelRight);
++	}
  
 -		if (ev->wdy) type = Wheel;
 -		else if ((ev->type & GPM_MOVE) || (ev->type & GPM_DRAG)) type = Move;
@@ -2016,18 +2266,6 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
 -		shell->mouseInput(newx, newy, type, buttons);
 -		x = newx;
 -		y = newy;
--	}
-+	if (ev->wdy) type = Wheel;
-+	else if ((ev->type & GPM_MOVE) || (ev->type & GPM_DRAG)) type = Move;
-+	else if (ev->type & GPM_DOWN) type = (ev->type & GPM_DOUBLE) ? DblClick : Press;
-+	else if (ev->type & GPM_UP) type = Release;
-+	if (type == -1) return;
-+
-+	if (ev->buttons & GPM_B_LEFT) buttons |= LeftButton;
-+	if (ev->buttons & GPM_B_MIDDLE) buttons |= MidButton;
-+	if (ev->buttons & GPM_B_RIGHT) buttons |= RightButton;
-+	if (type == Wheel) buttons |= ((ev->wdy < 0) ? WheelDown : WheelUp);
-+
 +	// On release the event already shows the button as up, so
 +	// report the state from just before it: SGR encoding needs
 +	// to know which button was released. Then remember the
@@ -2040,7 +2278,19 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
 +	if (ev->modifiers & (1 << KG_CTRL)) buttons |= ControlButton;
 +	if (ev->modifiers & ((1 << KG_ALT) | (1 << KG_ALTGR))) buttons |= AltButton;
 +
-+	s16 newx = (s16)x + ev->dx, newy =(s16)y + ev->dy;
++	// Accumulated dx/dy drifts whenever events were delivered
++	// elsewhere (mouse used on another console before FbTerm
++	// started or while it was hidden). The daemon also reports
++	// the absolute position; resync from it when (re)appearing.
++	s16 newx, newy;
++	if (posSync && ev->x > 0 && ev->y > 0) {
++		posSync = false;
++		newx = ev->x - 1;
++		newy = ev->y - 1;
++	} else {
++		newx = (s16)x + ev->dx;
++		newy = (s16)y + ev->dy;
+ 	}
 +	if (newx < 0) newx = 0;
 +	if (newy < 0) newy = 0;
 +	if (newx >= maxx) newx = maxx - 1;
@@ -2056,20 +2306,24 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
  {
 +	// Coming back to this console is a good moment to retry if an
 +	// earlier reconnect failed (daemon restarted while away).
-+	if (enter && fd() == -1 && connectGpm()) redrawScreen();
++	if (enter) {
++		posSync = true;
++		if (fd() == -1 && connectGpm()) redrawScreen();
++	}
  }
  
  #else
-@@ -158,6 +249,8 @@
+@@ -158,6 +268,9 @@
  
  Mouse::Mouse()
  {
 +	evLen = 0;
 +	reconnectPending = false;
++	posSync = false;
  }
  
  Mouse::~Mouse()
-@@ -169,6 +262,10 @@
+@@ -169,6 +282,10 @@
  	ioctl(STDIN_FILENO, KDSETMODE, enter ? KD_GRAPHICS : KD_TEXT);
  }
  
@@ -2082,8 +2336,8 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
  }
 diff -ruN '--exclude=Makefile.in' a/src/mouse.h b/src/mouse.h
 --- a/src/mouse.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/mouse.h	2026-11-19 04:10:20.056471671 +0000
-@@ -24,14 +24,26 @@
++++ b/src/mouse.h	2026-11-20 02:16:11.808347992 +0000
+@@ -24,14 +24,27 @@
  #include "io.h"
  #include "instance.h"
  
@@ -2102,6 +2356,7 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.h b/src/mouse.h
 +	void processEvent(FbShell *shell, Gpm_Event *ev);
 +
 +	bool reconnectPending;
++	bool posSync; // next event: trust the daemon's absolute position
 +	s8 evBuf[64];
 +	u32 evLen;
  
@@ -2112,7 +2367,7 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.h b/src/mouse.h
  #endif
 diff -ruN '--exclude=Makefile.in' a/src/screen.cpp b/src/screen.cpp
 --- a/src/screen.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen.cpp	2026-11-19 04:08:50.036471671 +0000
++++ b/src/screen.cpp	2026-11-20 02:12:31.744347992 +0000
 @@ -197,7 +197,7 @@
  	}
  }
@@ -2223,7 +2478,7 @@ diff -ruN '--exclude=Makefile.in' a/src/screen.cpp b/src/screen.cpp
  
 diff -ruN '--exclude=Makefile.in' a/src/screen.h b/src/screen.h
 --- a/src/screen.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen.h	2026-11-19 04:08:50.036471671 +0000
++++ b/src/screen.h	2026-11-20 02:12:31.744347992 +0000
 @@ -45,8 +45,8 @@
  	void rotateRect(u32 &x, u32 &y, u32 &w, u32 &h);
  	void rotatePoint(u32 w, u32 h, u32 &x, u32 &y);
@@ -2278,7 +2533,7 @@ diff -ruN '--exclude=Makefile.in' a/src/screen.h b/src/screen.h
  	drawFun draw;
 diff -ruN '--exclude=Makefile.in' a/src/screen_render.cpp b/src/screen_render.cpp
 --- a/src/screen_render.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen_render.cpp	2026-11-19 04:08:50.036471671 +0000
++++ b/src/screen_render.cpp	2026-11-20 02:12:31.744347992 +0000
 @@ -109,7 +109,7 @@
  	if (bgimage_mem) delete[] bgimage_mem;
  }

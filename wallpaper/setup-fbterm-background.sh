@@ -899,6 +899,7 @@ open_fbterm() {
     [ -x "$SESSION_SHELL" ] || SESSION_SHELL=/bin/bash
     "$FBTERM_BIN" -- "$SESSION_SHELL" -l >"$LOG_DIR/fbterm.log" 2>&1
     FBTERM_STATUS=$?
+    [ -n "${MEV_PID:-}" ] && kill "$MEV_PID" 2>/dev/null
     # Re-show the kernel-console cursor (hidden while painting; see
     # below). FbTerm draws its own cursor while it runs.
     printf '\033[?25h'
@@ -940,6 +941,18 @@ fi
 # the session for more than 10 seconds.
 export FRAMEBUFFER="$FBDEV"
 printf '\033[?25l'
+# While no gpm client is connected, the daemon draws its own pointer
+# with the kernel text selection; on a framebuffer console that
+# repaints cells from the (black) text buffer, and FbTerm would then
+# capture the trail into the background. Hold a throwaway client
+# during the paint so the daemon keeps its pointer off the screen.
+# It stays connected while FbTerm runs (FbTerm is the newer client
+# and gets the mouse) and is stopped when FbTerm exits.
+MEV_PID=
+if command -v mev >/dev/null 2>&1; then
+    mev >/dev/null 2>&1 &
+    MEV_PID=$!
+fi
 if command -v timeout >/dev/null 2>&1; then
     timeout 10 "$IDUMP_BIN" "${IDUMP_ARGS[@]}" "$IMG" >/dev/null 2>&1
 else
