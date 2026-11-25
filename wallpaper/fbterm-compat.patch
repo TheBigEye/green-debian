@@ -1,6 +1,6 @@
 diff -ruN '--exclude=Makefile.in' a/src/Makefile.am b/src/Makefile.am
 --- a/src/Makefile.am	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/Makefile.am	2026-11-25 02:45:43.864880016 +0000
++++ b/src/Makefile.am	2026-11-25 03:55:50.572751317 +0000
 @@ -3,7 +3,7 @@
  bin_PROGRAMS = fbterm
  
@@ -12,7 +12,7 @@ diff -ruN '--exclude=Makefile.in' a/src/Makefile.am b/src/Makefile.am
  
 diff -ruN '--exclude=Makefile.in' a/src/fbshell.cpp b/src/fbshell.cpp
 --- a/src/fbshell.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/fbshell.cpp	2026-11-25 02:45:43.864880016 +0000
++++ b/src/fbshell.cpp	2026-11-25 03:55:50.572751317 +0000
 @@ -33,28 +33,35 @@
  #include "screen.h"
  #include "improxy.h"
@@ -131,7 +131,7 @@ diff -ruN '--exclude=Makefile.in' a/src/fbshell.cpp b/src/fbshell.cpp
  	}
 diff -ruN '--exclude=Makefile.in' a/src/fbterm.cpp b/src/fbterm.cpp
 --- a/src/fbterm.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/fbterm.cpp	2026-11-25 02:48:46.700880016 +0000
++++ b/src/fbterm.cpp	2026-11-25 03:56:19.944751317 +0000
 @@ -20,7 +20,10 @@
  
  #include <unistd.h>
@@ -196,22 +196,20 @@ diff -ruN '--exclude=Makefile.in' a/src/fbterm.cpp b/src/fbterm.cpp
  	if (!TtyInput::instance() || !Screen::instance()) return;
  
  	struct vt_mode vtm;
-@@ -143,9 +185,11 @@
- 	signal(SIGTERM, sh);
- 	signal(SIGHUP, sh);
+@@ -145,7 +187,9 @@
  #endif
-+#ifndef HAVE_SIGNALFD
-+	if (getenv("FBTERM_SLIDESHOW_FILE")) new BgIo;
-+#endif
  	signal(SIGPIPE, SIG_IGN);
  
 -	Mouse::instance();
++	// Slideshow watcher (both signal backends need it).
++	if (getenv("FBTERM_SLIDESHOW_FILE")) new BgIo;
++
  	mInit = true;
  }
  
 diff -ruN '--exclude=Makefile.in' a/src/input.cpp b/src/input.cpp
 --- a/src/input.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/input.cpp	2026-11-25 02:45:43.864880016 +0000
++++ b/src/input.cpp	2026-11-25 03:55:50.572751317 +0000
 @@ -28,6 +28,7 @@
  #include <linux/input.h>
  #include "input.h"
@@ -385,7 +383,7 @@ diff -ruN '--exclude=Makefile.in' a/src/input.cpp b/src/input.cpp
 +}
 diff -ruN '--exclude=Makefile.in' a/src/input.h b/src/input.h
 --- a/src/input.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/input.h	2026-11-25 02:45:43.864880016 +0000
++++ b/src/input.h	2026-11-25 03:55:50.572751317 +0000
 @@ -24,19 +24,34 @@
  #include "io.h"
  #include "instance.h"
@@ -423,7 +421,7 @@ diff -ruN '--exclude=Makefile.in' a/src/input.h b/src/input.h
  #endif
 diff -ruN '--exclude=Makefile.in' a/src/kittykey.cpp b/src/kittykey.cpp
 --- a/src/kittykey.cpp	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/kittykey.cpp	2026-11-25 02:45:43.864880016 +0000
++++ b/src/kittykey.cpp	2026-11-25 03:55:50.572751317 +0000
 @@ -0,0 +1,648 @@
 +/*
 + *   kittykey.cpp - kitty keyboard protocol encoder (see kittykey.h).
@@ -1075,7 +1073,7 @@ diff -ruN '--exclude=Makefile.in' a/src/kittykey.cpp b/src/kittykey.cpp
 +}
 diff -ruN '--exclude=Makefile.in' a/src/kittykey.h b/src/kittykey.h
 --- a/src/kittykey.h	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/kittykey.h	2026-11-25 02:45:43.864880016 +0000
++++ b/src/kittykey.h	2026-11-25 03:55:50.576751317 +0000
 @@ -0,0 +1,75 @@
 +/*
 + *   kittykey.h - kitty keyboard protocol encoder for FbTerm.
@@ -1154,7 +1152,7 @@ diff -ruN '--exclude=Makefile.in' a/src/kittykey.h b/src/kittykey.h
 +#endif
 diff -ruN '--exclude=Makefile.in' a/src/lib/shell.cpp b/src/lib/shell.cpp
 --- a/src/lib/shell.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/shell.cpp	2026-11-25 02:45:43.864880016 +0000
++++ b/src/lib/shell.cpp	2026-11-25 03:55:50.576751317 +0000
 @@ -144,8 +144,9 @@
  	s32 btn = buttons & MouseButtonMask;
  	s32 modifies = buttons & ModifyButtonMask;
@@ -1268,7 +1266,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/shell.cpp b/src/lib/shell.cpp
  	SWAP(start, end);
 diff -ruN '--exclude=Makefile.in' a/src/lib/shell.h b/src/lib/shell.h
 --- a/src/lib/shell.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/shell.h	2026-11-25 02:45:43.864880016 +0000
++++ b/src/lib/shell.h	2026-11-25 03:55:50.576751317 +0000
 @@ -33,6 +33,8 @@
  	MidButton	= 0x0004,
  	WheelDown	= 0x0008,
@@ -1296,8 +1294,8 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/shell.h b/src/lib/shell.h
  	void textSelect(u16 x, u16 y, s32 type, s32 buttons);
  	void startTextSelect(u16 x, u16 y);
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.cpp b/src/lib/vterm.cpp
---- a/src/lib/vterm.cpp	2026-11-25 02:45:43.856880016 +0000
-+++ b/src/lib/vterm.cpp	2026-11-25 02:45:43.864880016 +0000
+--- a/src/lib/vterm.cpp	2026-11-25 03:56:27.520751317 +0000
++++ b/src/lib/vterm.cpp	2026-11-25 03:55:50.576751317 +0000
 @@ -25,7 +25,7 @@
  #define MIN(a, b) ((a) < (b) ? (a) : (b))
  #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -1526,7 +1524,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.cpp b/src/lib/vterm.cpp
 +}
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
 --- a/src/lib/vterm.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/vterm.h	2026-11-25 02:45:43.864880016 +0000
++++ b/src/lib/vterm.h	2026-11-25 03:55:50.576751317 +0000
 @@ -32,7 +32,7 @@
  
  		bool operator != (const CharAttr a) {
@@ -1670,7 +1668,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
  	static u16 history_lines;
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
 --- a/src/lib/vterm_action.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/vterm_action.cpp	2026-11-25 02:45:43.864880016 +0000
++++ b/src/lib/vterm_action.cpp	2026-11-25 03:55:50.576751317 +0000
 @@ -92,10 +92,66 @@
  {
  	q_mode = 0;
@@ -2088,8 +2086,8 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_act
  
  	case 3:
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_states.cpp b/src/lib/vterm_states.cpp
---- a/src/lib/vterm_states.cpp	2026-11-25 02:45:43.856880016 +0000
-+++ b/src/lib/vterm_states.cpp	2026-11-25 02:45:43.864880016 +0000
+--- a/src/lib/vterm_states.cpp	2026-11-25 03:56:27.520751317 +0000
++++ b/src/lib/vterm_states.cpp	2026-11-25 03:55:50.576751317 +0000
 @@ -50,7 +50,8 @@
  
  	// ESesc
@@ -2132,7 +2130,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_states.cpp b/src/lib/vterm_sta
  };
 diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
 --- a/src/mouse.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/mouse.cpp	2026-11-25 02:45:43.864880016 +0000
++++ b/src/mouse.cpp	2026-11-25 03:55:50.576751317 +0000
 @@ -32,6 +32,7 @@
  #include <sys/types.h>
  #include <sys/socket.h>
@@ -2390,7 +2388,7 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
  }
 diff -ruN '--exclude=Makefile.in' a/src/mouse.h b/src/mouse.h
 --- a/src/mouse.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/mouse.h	2026-11-25 02:45:43.864880016 +0000
++++ b/src/mouse.h	2026-11-25 03:55:50.576751317 +0000
 @@ -24,14 +24,27 @@
  #include "io.h"
  #include "instance.h"
@@ -2421,7 +2419,7 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.h b/src/mouse.h
  #endif
 diff -ruN '--exclude=Makefile.in' a/src/screen.cpp b/src/screen.cpp
 --- a/src/screen.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen.cpp	2026-11-25 02:45:43.864880016 +0000
++++ b/src/screen.cpp	2026-11-25 03:55:50.576751317 +0000
 @@ -197,7 +197,7 @@
  	}
  }
@@ -2532,7 +2530,7 @@ diff -ruN '--exclude=Makefile.in' a/src/screen.cpp b/src/screen.cpp
  
 diff -ruN '--exclude=Makefile.in' a/src/screen.h b/src/screen.h
 --- a/src/screen.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen.h	2026-11-25 02:48:46.700880016 +0000
++++ b/src/screen.h	2026-11-25 03:55:50.576751317 +0000
 @@ -45,14 +45,21 @@
  	void rotateRect(u32 &x, u32 &y, u32 &w, u32 &h);
  	void rotatePoint(u32 w, u32 h, u32 &x, u32 &y);
@@ -2604,7 +2602,7 @@ diff -ruN '--exclude=Makefile.in' a/src/screen.h b/src/screen.h
  	drawFun draw;
 diff -ruN '--exclude=Makefile.in' a/src/screen_render.cpp b/src/screen_render.cpp
 --- a/src/screen_render.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen_render.cpp	2026-11-25 02:51:28.676880016 +0000
++++ b/src/screen_render.cpp	2026-11-25 03:57:25.380751317 +0000
 @@ -20,6 +20,9 @@
  
  #include <stdlib.h>
@@ -2761,7 +2759,7 @@ diff -ruN '--exclude=Makefile.in' a/src/screen_render.cpp b/src/screen_render.cp
 +	if (!f) return false;
 +
 +	u32 head[5];
-+	bool ok = fread(head, 4, 5, f) == 5 && head[0] == 0x31474246
++	bool ok = fread(head, 4, 5, f) == 5 && !memcmp(head, "FBG1", 4)
 +		&& head[1] == mWidth && head[2] == mHeight;
 +	u32 *img = 0;
 +	if (ok) {

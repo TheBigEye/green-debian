@@ -59,6 +59,9 @@ BACKUP="$DEST.bak"
 # The GPM build is the only one with a mouse; it contains this path.
 has_gpm() { grep -a -q '/dev/gpmctl' "$1" 2>/dev/null; }
 
+# Only builds with the working slideshow watcher contain this.
+has_slideshow() { grep -a -q 'FBG1' "$1" 2>/dev/null; }
+
 check_binary() { # check_binary FILE (a candidate to install)
     [ -f "$1" ] || fail "no such file: $1"
     [ -x "$1" ] || fail "not executable: $1"
@@ -67,6 +70,11 @@ check_binary() { # check_binary FILE (a candidate to install)
     if ldd "$1" 2>/dev/null | grep -q 'not found'; then
         ldd "$1" | grep 'not found' >&2
         fail "$1 has unresolved shared libraries"
+    fi
+    if ! has_slideshow "$1" && [ "$FORCE" -ne 1 ]; then
+        fail "$1 was built without slideshow support (old patch?).
+Rebuild with the current fbterm-compat.patch, or use --force to
+install it anyway."
     fi
     if ! has_gpm "$1" && [ "$FORCE" -ne 1 ]; then
         fail "$1 was built without GPM: the mouse will not work inside

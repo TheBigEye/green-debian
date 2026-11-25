@@ -223,7 +223,7 @@ build_patched() (
     # support (the GPM build contains the /dev/gpmctl path).
     if [ -x "$DEST" ] && "$DEST" -V 2>/dev/null | grep -q 'FbTerm version 1.7' \
        && grep -a -q '/dev/gpmctl' "$DEST" 2>/dev/null \
-       && grep -a -q 'FBTERM_SLIDESHOW_FILE' "$DEST" 2>/dev/null; then
+       && grep -a -q 'FBG1' "$DEST" 2>/dev/null; then
         echo "Patched FbTerm already installed and working: $DEST"
         echo "Skipping the build. To force a rebuild (e.g. after a"
         echo "patch update), remove it first:  sudo rm $DEST"
@@ -377,7 +377,7 @@ build_patched() (
     [ -x "$SRC_DIR/src/fbterm" ] || fail "build finished but src/fbterm is missing"
     grep -a -q '/dev/gpmctl' "$SRC_DIR/src/fbterm" \
         || fail "the built fbterm has no GPM mouse support (is libgpm-dev installed?)"
-    grep -a -q 'FBTERM_SLIDESHOW_FILE' "$SRC_DIR/src/fbterm" \
+    grep -a -q 'FBG1' "$SRC_DIR/src/fbterm" \
         || fail "the built fbterm has no slideshow support (was the patch applied?)"
 
     # --- Install ----------------------------------------------------------------------
@@ -561,7 +561,7 @@ verify_install() {
         else
             v_bad "patched fbterm was built without GPM (no mouse inside FbTerm; rebuild with libgpm-dev installed)"
         fi
-        if grep -a -q 'FBTERM_SLIDESHOW_FILE' "$DEST_PATCHED" 2>/dev/null; then
+        if grep -a -q 'FBG1' "$DEST_PATCHED" 2>/dev/null; then
             v_ok "patched fbterm has slideshow support"
         else
             v_bad "patched fbterm lacks slideshow support (rebuild it with the current patch)"
