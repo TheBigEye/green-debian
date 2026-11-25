@@ -396,7 +396,7 @@ Other flags:
 | Flag | What it does |
 | --- | --- |
 | `--no-patched` | Use the stock Debian FbTerm instead of building the patched one. |
-| `--rebuild-idump` | Rebuild the bundled `idump` viewer from its source tarball. |
+| `--rebuild-idump` | Rebuild the bundled `idump` viewer and the `fbrender` slideshow renderer from source. |
 | `--allow-root` | Allow running as root (it normally refuses). |
 
 Running the installer again is safe. It skips the parts that are already
@@ -438,6 +438,46 @@ recent vim, Neovim and tmux versions expect.
 If you only want the new binary, without running the whole setup
 again and without touching your `~/.fbtermrc`, use:
 
+### Background slideshow
+
+While FbTerm runs, the background rotates through the gallery:
+the PNG images in `~/.local/share/fbterm-background/gallery`
+(the setup copies the repo's `gallery/` folder there; drop more
+PNGs into it whenever you like). Every 60 seconds the next image
+fades in. Only the background changes. The text on your terminal,
+your cursor and your programs are never touched, because the
+patched FbTerm blends the two backgrounds underneath the text it
+already draws.
+
+Everything about it is tuned in
+`~/.config/fbterm-background/config`, and slideshow changes are
+picked up while you work, within a second or two:
+
+| Setting | What it does |
+| --- | --- |
+| `FBTERM_SLIDESHOW` | `on` or `off`: the whole slideshow. |
+| `FBTERM_SLIDESHOW_INTERVAL` | Seconds each image stays (5 to 86400). Default 60. |
+| `FBTERM_SLIDESHOW_ORDER` | `sequence` (file name order) or `random` (never the same image twice in a row). |
+| `FBTERM_SLIDESHOW_TRANSITION` | `crossfade`, `black` (fade via black), `white` (fade via white), `none` (instant), or `random`. |
+| `FBTERM_SLIDESHOW_DURATION_MS` | How long a transition takes, 0 to 10000 ms. Default 800. |
+| `FBTERM_SLIDESHOW_REMEMBER` | `on`: each login starts on the image the last session ended with. |
+| `FBTERM_SLIDESHOW_SIZE` | Render size override like `1920x1080`. Empty means the real framebuffer size. |
+| `FBTERM_GALLERY_DIR` | A different gallery folder (absolute path). Empty means the default one above. |
+
+Notes:
+
+- The slideshow needs the patched FbTerm and the `fbrender`
+  helper. On an existing install, update both with
+  `./replace-fbterm-binary.sh` (new binary) and a normal run of
+  `./setup-fbterm-background.sh` (renderer, rotator, launcher).
+  If `fbrender` is ever missing, build it together with the
+  viewer: `./setup-fbterm-background.sh --rebuild-idump`.
+- To jump to the next image right away, run
+  `touch ~/.local/share/fbterm-background/slideshow.next`.
+- The slideshow pauses on its own when you switch to another
+  virtual console and resumes when you come back (the background
+  is already the current image when the screen is redrawn).
+
 ```sh
 ./replace-fbterm-binary.sh          # build and swap the binary
 ./replace-fbterm-binary.sh --check  # show what is installed now
@@ -463,11 +503,12 @@ Step by step, this is what it does:
    converted to PNG first. For that, one of these has to be installed:
    ImageMagick, ffmpeg, or python3 with PIL. If none is available, the
    script stops and tells you, and the old background stays in place.
-3. FbTerm reads the background only when it starts. So if you run the
-   script inside a running FbTerm, it asks whether to restart FbTerm
-   now. Restarting ends your session inside FbTerm (like typing
-   `exit`) and takes you back to the login prompt. Log in again and
-   the new image is there.
+3. With the patched FbTerm running, the session fades to the new
+   image right away; no restart is needed. With the stock FbTerm,
+   the background is only read when FbTerm starts, so the script
+   then asks whether to restart FbTerm now. Restarting ends your
+   session inside FbTerm (like typing `exit`) and takes you back
+   to the login prompt. Log in again and the new image is there.
 
 To change and restart in one step, without being asked:
 
@@ -513,7 +554,9 @@ inside vim (put `colorscheme habamax` in `~/.vimrc` to keep it).
 | --- | --- |
 | `setup-fbterm-background.sh` | The installer and uninstaller. Runs in phases and verifies itself. |
 | `set-fbterm-wallpaper.sh` | Changes the installed background image. See "Changing the wallpaper" above. |
-| `wallpaper.png` | The default background image, installed by the setup script. |
+| `gallery/` | The wallpaper images. The setup copies them to `~/.local/share/fbterm-background/gallery`, and the slideshow rotates through them. |
+| `fbterm-slideshow.sh` | The slideshow rotator. Installed as `~/.local/bin/fbterm-slideshow` and started by the login launcher. |
+| `fbrender.c` | Source of the slideshow renderer (built into `~/.local/bin/fbrender`): turns a PNG into the raw background file the patched FbTerm fades to. |
 | `idump` | The framebuffer image viewer, a small static binary. |
 | `idump-0.2.0.tar.gz` and `idump.sha256` | The viewer source and its checksum. Used by `--rebuild-idump`, or if the binary is missing from a fresh clone. |
 | `Default8x16.bdf` | The classic 8x16 console font, registered through fontconfig. |

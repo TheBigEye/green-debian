@@ -29,6 +29,8 @@ BACKGROUND_BRIGHTNESS=35   # percent: 100 = original, lower = darker
 
 DEST_BIN="$HOME/.local/bin/fbterm-background"
 DEST_IDUMP="$HOME/.local/bin/idump"
+DEST_RENDER="$HOME/.local/bin/fbrender"
+DEST_SLIDESHOW="$HOME/.local/bin/fbterm-slideshow"
 DEST_DATA="$HOME/.local/share/fbterm-background"
 DEST_CONFIG_DIR="$HOME/.config/fbterm-background"
 DEST_FONT_DIR="$HOME/.local/share/fonts/fbterm-background"
@@ -166,7 +168,7 @@ uninstall_core() {
         clean_profile_file "$f" >/dev/null || true
     done
     # Current files.
-    rm -f "$DEST_BIN" "$DEST_IDUMP" "$DEST_FONTCONFIG_FILE"
+    rm -f "$DEST_BIN" "$DEST_IDUMP" "$DEST_FONTCONFIG_FILE" "$DEST_RENDER" "$DEST_SLIDESHOW"
     rm -rf "$HOME/.cache/fbterm-background" "$DEST_CONFIG_DIR" "$DEST_DATA" \
            "$DEST_FONT_DIR"
     # Legacy files from the previous (Spanish) version.
@@ -220,14 +222,15 @@ build_patched() (
     # skip the build when the installed binary really has mouse
     # support (the GPM build contains the /dev/gpmctl path).
     if [ -x "$DEST" ] && "$DEST" -V 2>/dev/null | grep -q 'FbTerm version 1.7' \
-       && grep -a -q '/dev/gpmctl' "$DEST" 2>/dev/null; then
+       && grep -a -q '/dev/gpmctl' "$DEST" 2>/dev/null \
+       && grep -a -q 'FBTERM_SLIDESHOW_FILE' "$DEST" 2>/dev/null; then
         echo "Patched FbTerm already installed and working: $DEST"
         echo "Skipping the build. To force a rebuild (e.g. after a"
         echo "patch update), remove it first:  sudo rm $DEST"
         exit 0
     fi
     if [ -x "$DEST" ]; then
-        echo "Existing $DEST has no GPM mouse support; rebuilding it."
+        echo "Existing $DEST lacks current features (GPM mouse or slideshow); rebuilding it."
     fi
     fail() { echo "setup (patched fbterm): $*" >&2; exit 1; }
     have_cmd() { command -v "$1" >/dev/null 2>&1; }
@@ -374,6 +377,8 @@ build_patched() (
     [ -x "$SRC_DIR/src/fbterm" ] || fail "build finished but src/fbterm is missing"
     grep -a -q '/dev/gpmctl' "$SRC_DIR/src/fbterm" \
         || fail "the built fbterm has no GPM mouse support (is libgpm-dev installed?)"
+    grep -a -q 'FBTERM_SLIDESHOW_FILE' "$SRC_DIR/src/fbterm" \
+        || fail "the built fbterm has no slideshow support (was the patch applied?)"
 
     # --- Install ----------------------------------------------------------------------
     echo "Installing $DEST"
@@ -523,6 +528,12 @@ rebuild_idump() (
     gcc -static -Os -s -std=gnu99 -fgnu89-inline ../libnsgif.c ../libnsbmp.c ../lodepng.c idump.c -o "$SCRIPT_DIR/idump" || exit 1
     chmod 0755 "$SCRIPT_DIR/idump"
     echo "Rebuilt viewer: $SCRIPT_DIR/idump"
+    # The slideshow renderer shares the PNG decoder with idump.
+    if [ -f "$SCRIPT_DIR/fbrender.c" ]; then
+        gcc -static -O2 -s -std=gnu99 -I.. "$SCRIPT_DIR/fbrender.c" ../lodepng.c -o "$SCRIPT_DIR/fbrender" || exit 1
+        chmod 0755 "$SCRIPT_DIR/fbrender"
+        echo "Rebuilt slideshow renderer: $SCRIPT_DIR/fbrender"
+    fi
 )
 
 # ---------------------------------------------------------------------------
@@ -550,6 +561,11 @@ verify_install() {
         else
             v_bad "patched fbterm was built without GPM (no mouse inside FbTerm; rebuild with libgpm-dev installed)"
         fi
+        if grep -a -q 'FBTERM_SLIDESHOW_FILE' "$DEST_PATCHED" 2>/dev/null; then
+            v_ok "patched fbterm has slideshow support"
+        else
+            v_bad "patched fbterm lacks slideshow support (rebuild it with the current patch)"
+        fi
     else
         v_bad "patched fbterm missing or not working ($DEST_PATCHED)"
     fi
@@ -563,6 +579,10 @@ verify_install() {
     if [ -x "$DEST_BIN" ]; then v_ok "launcher exists ($DEST_BIN)"; else v_bad "launcher missing ($DEST_BIN)"; fi
     if [ -x "$DEST_IDUMP" ] && "$DEST_IDUMP" -h >/dev/null 2>&1; then v_ok "idump viewer runs"; else v_bad "idump viewer missing or not runnable ($DEST_IDUMP)"; fi
     if [ -f "$DEST_DATA/wallpaper.png" ]; then v_ok "wallpaper installed"; else v_bad "wallpaper missing ($DEST_DATA/wallpaper.png)"; fi
+    if [ -d "$DEST_DATA/gallery" ] && ls "$DEST_DATA/gallery"/*.png >/dev/null 2>&1; then v_ok "gallery installed ($(ls "$DEST_DATA/gallery"/*.png | wc -l) image(s))"; else v_bad "gallery missing or empty ($DEST_DATA/gallery)"; fi
+    if [ -x "$DEST_RENDER" ] && "$DEST_RENDER" 2>&1 | grep -q '^usage: fbrender'; then v_ok "fbrender renderer runs"; else v_bad "fbrender missing or not runnable ($DEST_RENDER)"; fi
+    if [ -x "$DEST_SLIDESHOW" ] && bash -n "$DEST_SLIDESHOW" 2>/dev/null; then v_ok "slideshow script installed"; else v_bad "slideshow script missing ($DEST_SLIDESHOW)"; fi
+    if grep -q '^FBTERM_SLIDESHOW_INTERVAL=' "$DEST_CONFIG_DIR/config" 2>/dev/null; then v_ok "slideshow settings present in config"; else v_bad "slideshow settings missing in $DEST_CONFIG_DIR/config"; fi
     if command -v fc-match >/dev/null 2>&1; then
         if fc-match Default8x16 2>/dev/null | grep -qi 'Default8x16'; then
             v_ok "fontconfig resolves Default8x16"
@@ -633,6 +653,8 @@ verify_uninstall() {
     fi
     [ -e "$DEST_BIN" ] && { echo "  [FAIL] launcher remains: $DEST_BIN"; leftovers=$((leftovers + 1)); }
     [ -e "$DEST_IDUMP" ] && { echo "  [FAIL] viewer remains: $DEST_IDUMP"; leftovers=$((leftovers + 1)); }
+    [ -e "$DEST_RENDER" ] && { echo "  [FAIL] renderer remains: $DEST_RENDER"; leftovers=$((leftovers + 1)); }
+    [ -e "$DEST_SLIDESHOW" ] && { echo "  [FAIL] slideshow remains: $DEST_SLIDESHOW"; leftovers=$((leftovers + 1)); }
     [ -e "$DEST_DATA" ] && { echo "  [FAIL] data dir remains: $DEST_DATA"; leftovers=$((leftovers + 1)); }
     [ -e "$TERMINFO_COMPILED" ] && { echo "  [FAIL] terminfo entry remains: $TERMINFO_COMPILED"; leftovers=$((leftovers + 1)); }
     [ -e "$TERMINFO_SYS_COMPILED" ] && { echo "  [FAIL] system terminfo entry remains: $TERMINFO_SYS_COMPILED"; leftovers=$((leftovers + 1)); }
@@ -649,8 +671,13 @@ verify_uninstall() {
 
 install_core() {
 # --- Files shipped next to this script ----------------------------------------
-[ -f "$SCRIPT_DIR/wallpaper.png" ] || {
-    echo "Error: wallpaper.png is missing next to this script." >&2; exit 1; }
+[ -d "$SCRIPT_DIR/gallery" ] && ls "$SCRIPT_DIR/gallery"/*.png >/dev/null 2>&1 || {
+    echo "Error: the gallery folder (with at least one PNG image) is" >&2
+    echo "missing next to this script." >&2; exit 1; }
+if [ ! -f "$SCRIPT_DIR/idump" ] && command -v gcc >/dev/null 2>&1; then
+    echo "The idump binary is missing next to this script; building it (needed once)..."
+    rebuild_idump || true
+fi
 [ -f "$SCRIPT_DIR/idump" ] || {
     echo "Error: the idump binary is missing next to this script." >&2
     echo "If your architecture is not x86_64, build it first: ./setup-fbterm-background.sh --rebuild-idump" >&2
@@ -693,7 +720,17 @@ fi
 # --- Copy wallpaper, viewer and source ----------------------------------------
 mkdir -p "$DEST_DATA" "$DEST_CONFIG_DIR" "$HOME/.local/bin" \
          "$DEST_FONT_DIR" "$DEST_FONTCONFIG_DIR"
-install -m 0644 "$SCRIPT_DIR/wallpaper.png" "$DEST_DATA/wallpaper.png"
+# The gallery goes into the user's data folder. Images the user
+# adds there later are kept on reinstall.
+mkdir -p "$DEST_DATA/gallery"
+for img in "$SCRIPT_DIR/gallery"/*.png; do
+    [ -f "$img" ] && install -m 0644 "$img" "$DEST_DATA/gallery/"
+done
+echo "Gallery installed: $(ls "$DEST_DATA/gallery"/*.png | wc -l) image(s) in $DEST_DATA/gallery"
+# The login background (what shows before the slideshow starts)
+# is the first gallery image.
+FIRST_IMG="$(ls "$DEST_DATA/gallery"/*.png | LC_ALL=C sort | head -n 1)"
+install -m 0644 "$FIRST_IMG" "$DEST_DATA/wallpaper.png"
 # The old pre-cropped 16:9 file is no longer used: idump now fits the
 # original image to the actual framebuffer at login.
 rm -f "$DEST_DATA/wallpaper-16x9.png"
@@ -752,6 +789,36 @@ case "$FONT_STATUS" in
         ;;
 esac
 install -m 0755 "$SCRIPT_DIR/idump" "$DEST_IDUMP"
+# Slideshow renderer and rotator. The renderer is used prebuilt
+# when it sits next to this script; it is built on the fly when
+# gcc is available. Without it the slideshow is unavailable, but
+# the static background keeps working.
+if [ -f "$SCRIPT_DIR/fbrender" ]; then
+    install -m 0755 "$SCRIPT_DIR/fbrender" "$DEST_RENDER"
+elif [ -f "$SCRIPT_DIR/fbrender.c" ] && [ -f "$SCRIPT_DIR/idump-0.2.0.tar.gz" ] \
+     && command -v gcc >/dev/null 2>&1; then
+    RENDER_TMP="$(mktemp -d)"
+    if tar -xzf "$SCRIPT_DIR/idump-0.2.0.tar.gz" -C "$RENDER_TMP" 2>/dev/null \
+       && gcc -O2 -s -std=gnu99 -I"$RENDER_TMP/idump-0.2.0" "$SCRIPT_DIR/fbrender.c" "$RENDER_TMP/idump-0.2.0/lodepng.c" -o "$DEST_RENDER" 2>/dev/null; then
+        chmod 0755 "$DEST_RENDER"
+        echo "Built slideshow renderer on the fly: $DEST_RENDER"
+    else
+        echo "Warning: could not build the slideshow renderer (fbrender)." >&2
+        echo "The slideshow will be unavailable. To enable it later:" >&2
+        echo "  ./setup-fbterm-background.sh --rebuild-idump" >&2
+    fi
+    rm -rf "$RENDER_TMP"
+else
+    echo "Warning: no slideshow renderer available (fbrender)." >&2
+    echo "The slideshow will be unavailable. To enable it later:" >&2
+    echo "  ./setup-fbterm-background.sh --rebuild-idump" >&2
+fi
+if [ -f "$SCRIPT_DIR/fbterm-slideshow.sh" ]; then
+    install -m 0755 "$SCRIPT_DIR/fbterm-slideshow.sh" "$DEST_SLIDESHOW"
+else
+    echo "Warning: fbterm-slideshow.sh is missing next to this script;" >&2
+    echo "the slideshow will be unavailable." >&2
+fi
 # Transparency: the viewer's source code is installed too.
 if [ -f "$SCRIPT_DIR/idump-0.2.0.tar.gz" ]; then
     install -m 0644 "$SCRIPT_DIR/idump-0.2.0.tar.gz" "$DEST_DATA/"
@@ -772,15 +839,71 @@ fi
 # so a mode you chose (e.g. FBTERM_MODE=fit) survives updates.
 if [ ! -f "$DEST_CONFIG_DIR/config" ]; then
     cat > "$DEST_CONFIG_DIR/config" <<EOF_CFG
-# Persistent background settings.
+# Persistent background settings. The launcher reads this at
+# login; the slideshow re-reads it on every cycle, so slideshow
+# edits apply within a second or two, without logging in again.
 # cover = fill the display, cropping; fit = whole image, centered.
-# FBTERM_BRIGHTNESS is a percentage: 100 is the original image.
 FBTERM_MODE=$BACKGROUND_MODE
+# Background brightness: a percentage, 100 is the original image.
 FBTERM_BRIGHTNESS=$BACKGROUND_BRIGHTNESS
+
+# --- Slideshow ---------------------------------------------------
+# Rotate the background through the gallery while FbTerm runs.
+# Only the background changes; the terminal text is never touched.
+# Needs the patched FbTerm and the fbrender helper.
+FBTERM_SLIDESHOW=on
+# Seconds each image stays on screen (5 to 86400).
+FBTERM_SLIDESHOW_INTERVAL=60
+# sequence = gallery order (by file name); random = shuffled,
+# never the same image twice in a row when there are several.
+FBTERM_SLIDESHOW_ORDER=sequence
+# Transition between images: none, crossfade, black (fade via
+# black), white (fade via white), random (one per change).
+FBTERM_SLIDESHOW_TRANSITION=crossfade
+# Transition length in milliseconds (0 to 10000).
+FBTERM_SLIDESHOW_DURATION_MS=800
+# on = each login starts where the last rotation stopped.
+FBTERM_SLIDESHOW_REMEMBER=on
+# Render size override, e.g. 1920x1080. Empty = framebuffer size.
+FBTERM_SLIDESHOW_SIZE=
+# Gallery folder. Empty = ~/.local/share/fbterm-background/gallery
+# Drop PNG files there to add them to the rotation.
+FBTERM_GALLERY_DIR=
 EOF_CFG
     echo "Created $DEST_CONFIG_DIR/config (FBTERM_MODE=$BACKGROUND_MODE)"
 else
     echo "Keeping existing $DEST_CONFIG_DIR/config (not overwritten)."
+    # Older configs have no slideshow keys: append them (with the
+    # defaults) so the feature can be discovered and tuned. Keys
+    # the user already set are never touched.
+    if ! grep -q '^FBTERM_SLIDESHOW=' "$DEST_CONFIG_DIR/config"; then
+        cat >> "$DEST_CONFIG_DIR/config" <<'EOF_CFG2'
+
+# --- Slideshow ---------------------------------------------------
+# Rotate the background through the gallery while FbTerm runs.
+# Only the background changes; the terminal text is never touched.
+# Needs the patched FbTerm and the fbrender helper.
+FBTERM_SLIDESHOW=on
+# Seconds each image stays on screen (5 to 86400).
+FBTERM_SLIDESHOW_INTERVAL=60
+# sequence = gallery order (by file name); random = shuffled,
+# never the same image twice in a row when there are several.
+FBTERM_SLIDESHOW_ORDER=sequence
+# Transition between images: none, crossfade, black (fade via
+# black), white (fade via white), random (one per change).
+FBTERM_SLIDESHOW_TRANSITION=crossfade
+# Transition length in milliseconds (0 to 10000).
+FBTERM_SLIDESHOW_DURATION_MS=800
+# on = each login starts where the last rotation stopped.
+FBTERM_SLIDESHOW_REMEMBER=on
+# Render size override, e.g. 1920x1080. Empty = framebuffer size.
+FBTERM_SLIDESHOW_SIZE=
+# Gallery folder. Empty = ~/.local/share/fbterm-background/gallery
+# Drop PNG files there to add them to the rotation.
+FBTERM_GALLERY_DIR=
+EOF_CFG2
+        echo "Added slideshow settings to $DEST_CONFIG_DIR/config."
+    fi
 fi
 
 # --- Create the launcher ~/.local/bin/fbterm-background ------------------------
@@ -813,6 +936,9 @@ fi
 # only the values "cover" and "fit" are accepted.
 MODE="cover"
 BRIGHTNESS=35
+SLIDESHOW=on
+SLIDESHOW_REMEMBER=on
+GALLERY_DIR="$DATA/gallery"
 CONFIG_FILE="$HOME/.config/fbterm-background/config"
 if [ -f "$CONFIG_FILE" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
@@ -828,6 +954,12 @@ if [ -f "$CONFIG_FILE" ]; then
                 BRIGHTNESS="${line#FBTERM_BRIGHTNESS=}" ;;
             FBTERM_BRIGHTNESS=*)
                 echo "fbterm-background: ignoring invalid FBTERM_BRIGHTNESS in $CONFIG_FILE" >&2 ;;
+            FBTERM_SLIDESHOW=on|FBTERM_SLIDESHOW=off)
+                SLIDESHOW="${line#FBTERM_SLIDESHOW=}" ;;
+            FBTERM_SLIDESHOW_REMEMBER=on|FBTERM_SLIDESHOW_REMEMBER=off)
+                SLIDESHOW_REMEMBER="${line#FBTERM_SLIDESHOW_REMEMBER=}" ;;
+            FBTERM_GALLERY_DIR=/*)
+                GALLERY_DIR="${line#FBTERM_GALLERY_DIR=}" ;;
         esac
     done < "$CONFIG_FILE"
 fi
@@ -844,6 +976,16 @@ case "${FBTERM_BRIGHTNESS:-}" in
 esac
 
 IMG="$DATA/wallpaper.png"
+# With the slideshow remembering its place, log in showing the
+# image the rotation reached when the last session ended.
+if [ "$SLIDESHOW" = "on" ] && [ "$SLIDESHOW_REMEMBER" = "on" ] \
+   && [ -f "$DATA/slideshow.state" ]; then
+    STATE_IMG="$(head -n 1 "$DATA/slideshow.state" | tr -d '[:space:]')"
+    case "$STATE_IMG" in
+        */*|'') ;;
+        *) [ -f "$GALLERY_DIR/$STATE_IMG" ] && IMG="$GALLERY_DIR/$STATE_IMG" ;;
+    esac
+fi
 if [ "$MODE" = "fit" ]; then
     IDUMP_ARGS=(-f -d "$BRIGHTNESS")
 else
@@ -894,11 +1036,26 @@ open_fbterm() {
         # needs no output filter: colors and OSC are native there.
         export FBTERM_PATCHED=1
     fi
+    # Slideshow: with the patched FbTerm, the rotator renders the
+    # next gallery image and drops it at FBTERM_SLIDESHOW_FILE;
+    # FbTerm fades the background to it (text untouched). Only
+    # with a background, and only when both helpers are installed.
+    SLIDESHOW_PID=
+    if [ "$1" -eq 0 ] && [ "$FBTERM_BIN" != fbterm ] \
+       && [ -x "$HOME/.local/bin/fbterm-slideshow" ] \
+       && [ -x "$HOME/.local/bin/fbrender" ]; then
+        export FBTERM_SLIDESHOW_FILE="$DATA/next.fbg"
+        touch "$DATA/.session-active"
+        "$HOME/.local/bin/fbterm-slideshow" >/dev/null 2>&1 &
+        SLIDESHOW_PID=$!
+    fi
     # Open the user's login shell (bash, fish...) inside FbTerm.
     SESSION_SHELL="${SHELL:-/bin/bash}"
     [ -x "$SESSION_SHELL" ] || SESSION_SHELL=/bin/bash
     "$FBTERM_BIN" -- "$SESSION_SHELL" -l >"$LOG_DIR/fbterm.log" 2>&1
     FBTERM_STATUS=$?
+    [ -n "${SLIDESHOW_PID:-}" ] && kill "$SLIDESHOW_PID" 2>/dev/null
+    rm -f "$DATA/.session-active"
     [ -n "${MEV_PID:-}" ] && kill "$MEV_PID" 2>/dev/null
     # Re-show the kernel-console cursor (hidden while painting; see
     # below). FbTerm draws its own cursor while it runs.
@@ -1311,6 +1468,12 @@ Done. How to use it:
 Notes:
   - Image: ~/.config/fbterm-background/config has FBTERM_MODE=cover|fit
     and FBTERM_BRIGHTNESS=35; preserved across reinstalls.
+  - Slideshow: the background rotates through the PNG images in
+    ~/.local/share/fbterm-background/gallery every 60 seconds with
+    a crossfade. Interval, order, transition style and more are
+    FBTERM_SLIDESHOW_* settings in the same config file; edits
+    apply live, no need to log in again. Add PNGs to the gallery
+    folder to extend the rotation.
   - Disable without uninstalling: touch ~/.config/fbterm-background/disabled
   - One-off without background: fbterm-background --no-background
   - Everything is re-runnable: ./setup-fbterm-background.sh

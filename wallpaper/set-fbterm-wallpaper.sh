@@ -112,9 +112,55 @@ trap - EXIT
 echo "Background changed: $DEST"
 [ -f "$BACKUP" ] && echo "Previous background kept as: $BACKUP"
 
+# --- Live update ----------------------------------------------------------------
+# With the patched FbTerm, a running session can fade to the new
+# image right away: render it and drop it where FbTerm watches.
+# The launcher leaves a marker file while a session is active.
+RENDER_BIN="$HOME/.local/bin/fbrender"
+if [ -f "$DATA/.session-active" ] && [ -x "$RENDER_BIN" ]; then
+    CFG="$HOME/.config/fbterm-background/config"
+    L_MODE=cover; L_BRIGHT=35; L_TRANS=crossfade; L_DUR=800; L_SIZE=""
+    if [ -f "$CFG" ]; then
+        while IFS= read -r line; do
+            line="$(printf '%s' "${line%%#*}" | tr -d '[:space:]')"
+            case "$line" in
+                FBTERM_MODE=cover|FBTERM_MODE=fit) L_MODE="${line#FBTERM_MODE=}" ;;
+                FBTERM_BRIGHTNESS=[0-9]|FBTERM_BRIGHTNESS=[0-9][0-9]|FBTERM_BRIGHTNESS=100) L_BRIGHT="${line#FBTERM_BRIGHTNESS=}" ;;
+                FBTERM_SLIDESHOW_TRANSITION=none|FBTERM_SLIDESHOW_TRANSITION=crossfade|FBTERM_SLIDESHOW_TRANSITION=black|FBTERM_SLIDESHOW_TRANSITION=white) L_TRANS="${line#FBTERM_SLIDESHOW_TRANSITION=}" ;;
+                FBTERM_SLIDESHOW_DURATION_MS=[0-9]*) L_DUR="${line#FBTERM_SLIDESHOW_DURATION_MS=}" ;;
+                FBTERM_SLIDESHOW_SIZE=[0-9]*x[0-9]*) L_SIZE="${line#FBTERM_SLIDESHOW_SIZE=}" ;;
+            esac
+        done < "$CFG"
+    fi
+    case "$L_DUR" in *[!0-9]*|'') L_DUR=800 ;; esac
+    [ "$L_DUR" -le 10000 ] 2>/dev/null || L_DUR=800
+    FB="fb0"
+    case "${FRAMEBUFFER:-}" in */fb[0-9]*) FB="${FRAMEBUFFER##*/}" ;; esac
+    SIZE=""
+    if [ -r "/sys/class/graphics/$FB/virtual_size" ]; then
+        SIZE="$(tr ',' 'x' < "/sys/class/graphics/$FB/virtual_size" | tr -d '[:space:]')"
+    fi
+    case "$SIZE" in [0-9]*x[0-9]*) ;; *) SIZE="$L_SIZE" ;; esac
+    case "$SIZE" in
+        [0-9]*x[0-9]*)
+            LIVE_TMP="$DATA/.next.fbg.tmp.$$"
+            if "$RENDER_BIN" --size "$SIZE" --mode "$L_MODE" --brightness "$L_BRIGHT" \
+                    --transition "$L_TRANS" --duration "$L_DUR" \
+                    "$DEST" "$LIVE_TMP" >/dev/null 2>&1 \
+               && mv -f "$LIVE_TMP" "$DATA/next.fbg"; then
+                echo "The running FbTerm is fading to the new background now."
+                echo "Note: the slideshow (if on) will keep rotating the gallery;"
+                echo "this image is the one shown at login."
+                exit 0
+            fi
+            rm -f "$LIVE_TMP" ;;
+    esac
+    echo "Live update was not possible; falling back to a restart."
+fi
+
 # --- Refresh ------------------------------------------------------------------
-# FbTerm captured the framebuffer when it started; it cannot pick up
-# the new file on the fly, so "refresh" means restarting FbTerm.
+# Without live update (stock FbTerm, or no patched session), the
+# new file only shows when FbTerm restarts.
 if [ -z "${FBTERM_BACKGROUND_ACTIVE:-}" ]; then
     echo "FbTerm is not running here; the new background shows at the next login."
     if [ "$DO_RESTART" -eq 1 ]; then

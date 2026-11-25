@@ -1,6 +1,6 @@
 diff -ruN '--exclude=Makefile.in' a/src/Makefile.am b/src/Makefile.am
 --- a/src/Makefile.am	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/Makefile.am	2026-11-20 02:12:31.740347992 +0000
++++ b/src/Makefile.am	2026-11-25 02:45:43.864880016 +0000
 @@ -3,7 +3,7 @@
  bin_PROGRAMS = fbterm
  
@@ -12,7 +12,7 @@ diff -ruN '--exclude=Makefile.in' a/src/Makefile.am b/src/Makefile.am
  
 diff -ruN '--exclude=Makefile.in' a/src/fbshell.cpp b/src/fbshell.cpp
 --- a/src/fbshell.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/fbshell.cpp	2026-11-20 02:16:37.336347992 +0000
++++ b/src/fbshell.cpp	2026-11-25 02:45:43.864880016 +0000
 @@ -33,28 +33,35 @@
  #include "screen.h"
  #include "improxy.h"
@@ -131,8 +131,57 @@ diff -ruN '--exclude=Makefile.in' a/src/fbshell.cpp b/src/fbshell.cpp
  	}
 diff -ruN '--exclude=Makefile.in' a/src/fbterm.cpp b/src/fbterm.cpp
 --- a/src/fbterm.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/fbterm.cpp	2026-11-20 02:16:20.268347992 +0000
-@@ -110,6 +110,14 @@
++++ b/src/fbterm.cpp	2026-11-25 02:48:46.700880016 +0000
+@@ -20,7 +20,10 @@
+ 
+ #include <unistd.h>
+ #include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
+ #include <signal.h>
++#include <sys/timerfd.h>
+ #include <sys/ioctl.h>
+ #include <sys/stat.h>
+ #include <sys/wait.h>
+@@ -93,6 +96,37 @@
+ }
+ #endif
+ 
++// Polls the slideshow drop file and redraws when the
++// background changed. The interval adapts: slow while idle,
++// fast while a transition is running.
++class BgIo : public IoPipe {
++public:
++	BgIo() {
++		s32 fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
++		setFd(fd);
++		arm();
++	}
++
++private:
++	void arm() {
++		u32 ms = Screen::instance()->backgroundInterval();
++		if (ms < 20) ms = 20;
++		struct itimerspec ts;
++		memset(&ts, 0, sizeof(ts));
++		ts.it_value.tv_sec = ms / 1000;
++		ts.it_value.tv_nsec = (long)(ms % 1000) * 1000000;
++		timerfd_settime(fd(), 0, &ts, 0);
++	}
++
++	virtual void readyRead(s8 *buf, u32 len) {
++		if (Screen::instance()->pollBackground()) {
++			FbShell *shell = FbShellManager::instance()->activeShell();
++			if (shell) shell->expose(0, 0, shell->w(), shell->h());
++		}
++		arm();
++	}
++};
++
+ DEFINE_INSTANCE_DEFAULT(FbTerm)
+ 
+ FbTerm::FbTerm()
+@@ -110,6 +144,14 @@
  
  void FbTerm::init()
  {
@@ -147,8 +196,13 @@ diff -ruN '--exclude=Makefile.in' a/src/fbterm.cpp b/src/fbterm.cpp
  	if (!TtyInput::instance() || !Screen::instance()) return;
  
  	struct vt_mode vtm;
-@@ -145,7 +153,6 @@
+@@ -143,9 +185,11 @@
+ 	signal(SIGTERM, sh);
+ 	signal(SIGHUP, sh);
  #endif
++#ifndef HAVE_SIGNALFD
++	if (getenv("FBTERM_SLIDESHOW_FILE")) new BgIo;
++#endif
  	signal(SIGPIPE, SIG_IGN);
  
 -	Mouse::instance();
@@ -157,7 +211,7 @@ diff -ruN '--exclude=Makefile.in' a/src/fbterm.cpp b/src/fbterm.cpp
  
 diff -ruN '--exclude=Makefile.in' a/src/input.cpp b/src/input.cpp
 --- a/src/input.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/input.cpp	2026-11-20 02:12:31.740347992 +0000
++++ b/src/input.cpp	2026-11-25 02:45:43.864880016 +0000
 @@ -28,6 +28,7 @@
  #include <linux/input.h>
  #include "input.h"
@@ -331,7 +385,7 @@ diff -ruN '--exclude=Makefile.in' a/src/input.cpp b/src/input.cpp
 +}
 diff -ruN '--exclude=Makefile.in' a/src/input.h b/src/input.h
 --- a/src/input.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/input.h	2026-11-20 02:12:31.740347992 +0000
++++ b/src/input.h	2026-11-25 02:45:43.864880016 +0000
 @@ -24,19 +24,34 @@
  #include "io.h"
  #include "instance.h"
@@ -369,7 +423,7 @@ diff -ruN '--exclude=Makefile.in' a/src/input.h b/src/input.h
  #endif
 diff -ruN '--exclude=Makefile.in' a/src/kittykey.cpp b/src/kittykey.cpp
 --- a/src/kittykey.cpp	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/kittykey.cpp	2026-11-20 02:12:31.740347992 +0000
++++ b/src/kittykey.cpp	2026-11-25 02:45:43.864880016 +0000
 @@ -0,0 +1,648 @@
 +/*
 + *   kittykey.cpp - kitty keyboard protocol encoder (see kittykey.h).
@@ -1021,7 +1075,7 @@ diff -ruN '--exclude=Makefile.in' a/src/kittykey.cpp b/src/kittykey.cpp
 +}
 diff -ruN '--exclude=Makefile.in' a/src/kittykey.h b/src/kittykey.h
 --- a/src/kittykey.h	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/kittykey.h	2026-11-20 02:12:31.740347992 +0000
++++ b/src/kittykey.h	2026-11-25 02:45:43.864880016 +0000
 @@ -0,0 +1,75 @@
 +/*
 + *   kittykey.h - kitty keyboard protocol encoder for FbTerm.
@@ -1100,7 +1154,7 @@ diff -ruN '--exclude=Makefile.in' a/src/kittykey.h b/src/kittykey.h
 +#endif
 diff -ruN '--exclude=Makefile.in' a/src/lib/shell.cpp b/src/lib/shell.cpp
 --- a/src/lib/shell.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/shell.cpp	2026-11-20 02:16:11.808347992 +0000
++++ b/src/lib/shell.cpp	2026-11-25 02:45:43.864880016 +0000
 @@ -144,8 +144,9 @@
  	s32 btn = buttons & MouseButtonMask;
  	s32 modifies = buttons & ModifyButtonMask;
@@ -1214,7 +1268,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/shell.cpp b/src/lib/shell.cpp
  	SWAP(start, end);
 diff -ruN '--exclude=Makefile.in' a/src/lib/shell.h b/src/lib/shell.h
 --- a/src/lib/shell.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/shell.h	2026-11-20 02:16:11.808347992 +0000
++++ b/src/lib/shell.h	2026-11-25 02:45:43.864880016 +0000
 @@ -33,6 +33,8 @@
  	MidButton	= 0x0004,
  	WheelDown	= 0x0008,
@@ -1242,8 +1296,8 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/shell.h b/src/lib/shell.h
  	void textSelect(u16 x, u16 y, s32 type, s32 buttons);
  	void startTextSelect(u16 x, u16 y);
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.cpp b/src/lib/vterm.cpp
---- a/src/lib/vterm.cpp	2026-11-20 02:12:31.732347992 +0000
-+++ b/src/lib/vterm.cpp	2026-11-20 02:15:53.208347992 +0000
+--- a/src/lib/vterm.cpp	2026-11-25 02:45:43.856880016 +0000
++++ b/src/lib/vterm.cpp	2026-11-25 02:45:43.864880016 +0000
 @@ -25,7 +25,7 @@
  #define MIN(a, b) ((a) < (b) ? (a) : (b))
  #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -1472,7 +1526,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.cpp b/src/lib/vterm.cpp
 +}
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
 --- a/src/lib/vterm.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/vterm.h	2026-11-20 02:16:11.808347992 +0000
++++ b/src/lib/vterm.h	2026-11-25 02:45:43.864880016 +0000
 @@ -32,7 +32,7 @@
  
  		bool operator != (const CharAttr a) {
@@ -1616,7 +1670,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm.h b/src/lib/vterm.h
  	static u16 history_lines;
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_action.cpp
 --- a/src/lib/vterm_action.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/lib/vterm_action.cpp	2026-11-20 02:15:53.208347992 +0000
++++ b/src/lib/vterm_action.cpp	2026-11-25 02:45:43.864880016 +0000
 @@ -92,10 +92,66 @@
  {
  	q_mode = 0;
@@ -2034,8 +2088,8 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_action.cpp b/src/lib/vterm_act
  
  	case 3:
 diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_states.cpp b/src/lib/vterm_states.cpp
---- a/src/lib/vterm_states.cpp	2026-11-20 02:12:31.732347992 +0000
-+++ b/src/lib/vterm_states.cpp	2026-11-20 02:12:31.740347992 +0000
+--- a/src/lib/vterm_states.cpp	2026-11-25 02:45:43.856880016 +0000
++++ b/src/lib/vterm_states.cpp	2026-11-25 02:45:43.864880016 +0000
 @@ -50,7 +50,8 @@
  
  	// ESesc
@@ -2078,7 +2132,7 @@ diff -ruN '--exclude=Makefile.in' a/src/lib/vterm_states.cpp b/src/lib/vterm_sta
  };
 diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
 --- a/src/mouse.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/mouse.cpp	2026-11-20 02:16:20.268347992 +0000
++++ b/src/mouse.cpp	2026-11-25 02:45:43.864880016 +0000
 @@ -32,6 +32,7 @@
  #include <sys/types.h>
  #include <sys/socket.h>
@@ -2336,7 +2390,7 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.cpp b/src/mouse.cpp
  }
 diff -ruN '--exclude=Makefile.in' a/src/mouse.h b/src/mouse.h
 --- a/src/mouse.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/mouse.h	2026-11-20 02:16:11.808347992 +0000
++++ b/src/mouse.h	2026-11-25 02:45:43.864880016 +0000
 @@ -24,14 +24,27 @@
  #include "io.h"
  #include "instance.h"
@@ -2367,7 +2421,7 @@ diff -ruN '--exclude=Makefile.in' a/src/mouse.h b/src/mouse.h
  #endif
 diff -ruN '--exclude=Makefile.in' a/src/screen.cpp b/src/screen.cpp
 --- a/src/screen.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen.cpp	2026-11-20 02:12:31.744347992 +0000
++++ b/src/screen.cpp	2026-11-25 02:45:43.864880016 +0000
 @@ -197,7 +197,7 @@
  	}
  }
@@ -2478,8 +2532,8 @@ diff -ruN '--exclude=Makefile.in' a/src/screen.cpp b/src/screen.cpp
  
 diff -ruN '--exclude=Makefile.in' a/src/screen.h b/src/screen.h
 --- a/src/screen.h	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen.h	2026-11-20 02:12:31.744347992 +0000
-@@ -45,8 +45,8 @@
++++ b/src/screen.h	2026-11-25 02:48:46.700880016 +0000
+@@ -45,14 +45,21 @@
  	void rotateRect(u32 &x, u32 &y, u32 &w, u32 &h);
  	void rotatePoint(u32 w, u32 h, u32 &x, u32 &y);
  
@@ -2490,7 +2544,20 @@ diff -ruN '--exclude=Makefile.in' a/src/screen.h b/src/screen.h
  
  	bool move(u16 scol, u16 srow, u16 dcol, u16 drow, u16 w, u16 h);
  	void setPalette(const Color *palette);
-@@ -77,26 +77,26 @@
+ 	
+ 	void enableScroll(bool enable) { mScrollEnable = enable; }
+ 
++	// Live background slideshow: pollBackground() watches the
++	// file named by FBTERM_SLIDESHOW_FILE and crossfades the
++	// background image to its contents. Returns true when the
++	// background changed and the screen should be redrawn.
++	bool pollBackground();
++	u32 backgroundInterval();
++
+ 	void showInfo(bool verbose);
+ 	virtual void switchVc(bool enter);
+ 
+@@ -77,26 +84,30 @@
  	virtual const s8 *drvId() = 0;
  
  	void eraseMargin(bool top, u16 h);
@@ -2523,6 +2590,10 @@ diff -ruN '--exclude=Makefile.in' a/src/screen.h b/src/screen.h
 +	void draw15Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
 +	void draw16Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
 +	void draw32Bg(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap, bool bgSet);
++
++	u32 *bgCurrent();
++	bool bgLoad();
++	void bgWriteFrame(u32 t);
  
 -	typedef void (Screen::*fillFun)(u32 x, u32 y, u32 w, u8 color);
 -	typedef void (Screen::*drawFun)(u32 x, u32 y, u32 w, u8 fc, u8 bc, u8 *pixmap);
@@ -2533,9 +2604,228 @@ diff -ruN '--exclude=Makefile.in' a/src/screen.h b/src/screen.h
  	drawFun draw;
 diff -ruN '--exclude=Makefile.in' a/src/screen_render.cpp b/src/screen_render.cpp
 --- a/src/screen_render.cpp	2010-10-18 08:20:11.000000000 +0000
-+++ b/src/screen_render.cpp	2026-11-20 02:12:31.744347992 +0000
-@@ -109,7 +109,7 @@
++++ b/src/screen_render.cpp	2026-11-25 02:51:28.676880016 +0000
+@@ -20,6 +20,9 @@
+ 
+ #include <stdlib.h>
+ #include <string.h>
++#include <stdio.h>
++#include <time.h>
++#include <sys/stat.h>
+ #include "screen.h"
+ #include "fbconfig.h"
+ 
+@@ -34,6 +37,15 @@
+ static u8 *bgimage_mem;
+ static u8 bgcolor;
+ 
++// slideshow state (see pollBackground at the end of this file)
++static s8 *bgPath;
++static u32 *bgCur, *bgNext;
++static struct timespec bgSeen;
++static ino_t bgSeenIno;
++static bool bgHasSeen, bgAnim;
++static u32 bgTrans, bgDur;
++static u64 bgStart;
++
+ void Screen::setPalette(const Color *palette)
+ {
+ 	if (mPalette == palette) return;
+@@ -84,6 +96,23 @@
+ 		u32 size = mBytesPerLine * ((mRotateType == Rotate0 || mRotateType == Rotate180) ? mHeight : mWidth);
+ 		bgimage_mem = new u8[size];
+ 		memcpy(bgimage_mem, mVMemBase, size);
++
++		// Slideshow setup: remember where new backgrounds will
++		// be dropped and snapshot the current one for blending.
++		// A file already there counts as seen: only files that
++		// appear (or change) after FbTerm starts are picked up.
++		const s8 *path = getenv("FBTERM_SLIDESHOW_FILE");
++		if (path && *path && mRotateType == Rotate0
++		    && (mBitsPerPixel == 32 || mBitsPerPixel == 16 || mBitsPerPixel == 15)) {
++			bgPath = new s8[strlen(path) + 1];
++			strcpy(bgPath, path);
++			struct stat st;
++			if (!stat(bgPath, &st)) {
++				bgSeen = st.st_mtim;
++				bgSeenIno = st.st_ino;
++			}
++			bgHasSeen = true;
++		}
+ 	}
+ 
+ 	fill = bg ? &Screen::fillXBg : &Screen::fillX;
+@@ -107,9 +136,176 @@
+ void Screen::endFillDraw()
+ {
  	if (bgimage_mem) delete[] bgimage_mem;
++	delete[] bgPath;
++	delete[] bgCur;
++	delete[] bgNext;
++	bgPath = 0;
++	bgCur = bgNext = 0;
++}
++
++// ------------------------------------------------------------------
++// Live background slideshow.
++//
++// A helper program renders the next wallpaper into the file named
++// by FBTERM_SLIDESHOW_FILE (format: 5 little-endian u32 header
++// {magic "FBG1", width, height, transition, duration_ms} followed
++// by width*height XRGB pixels). Only the background buffer is
++// blended; the terminal text is drawn over it as usual, so the
++// screen content is never disturbed.
++
++u32 *Screen::bgCurrent()
++{
++	if (bgCur) return bgCur;
++
++	bgCur = new u32[(u64)mWidth * mHeight];
++	for (u32 y = 0; y < mHeight; y++) {
++		u8 *row = bgimage_mem + (u64)y * mBytesPerLine;
++		for (u32 x = 0; x < mWidth; x++) {
++			u32 v;
++			switch (mBitsPerPixel) {
++			case 32: v = ((u32 *)row)[x] & 0xffffff; break;
++			case 16: {
++				u32 p = ((u16 *)row)[x];
++				u32 r = (p >> 11) & 31, g = (p >> 5) & 63, b = p & 31;
++				v = (((r << 3) | (r >> 2)) << 16) | (((g << 2) | (g >> 4)) << 8) | ((b << 3) | (b >> 2));
++				break;
++			}
++			default: {
++				u32 p = ((u16 *)row)[x];
++				u32 r = (p >> 10) & 31, g = (p >> 5) & 31, b = p & 31;
++				v = (((r << 3) | (r >> 2)) << 16) | (((g << 3) | (g >> 2)) << 8) | ((b << 3) | (b >> 2));
++				break;
++			}
++			}
++			bgCur[(u64)y * mWidth + x] = v;
++		}
++	}
++	return bgCur;
++}
++
++static u64 bgNowMs()
++{
++	struct timespec ts;
++	clock_gettime(CLOCK_MONOTONIC, &ts);
++	return (u64)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
++}
++
++static inline u32 bgBlend(u32 a, u32 b, u32 t) // t in 0..1000
++{
++	u32 r = ((a >> 16) & 255) + (u32)(((s32)((b >> 16) & 255) - (s32)((a >> 16) & 255)) * (s32)t / 1000);
++	u32 g = ((a >> 8) & 255) + (u32)(((s32)((b >> 8) & 255) - (s32)((a >> 8) & 255)) * (s32)t / 1000);
++	u32 bl = (a & 255) + (u32)(((s32)(b & 255) - (s32)(a & 255)) * (s32)t / 1000);
++	return (r << 16) | (g << 8) | bl;
++}
++
++void Screen::bgWriteFrame(u32 t)
++{
++	u32 *oldImg = bgCurrent();
++	u64 n = (u64)mWidth * mHeight;
++
++	for (u32 y = 0; y < mHeight; y++) {
++		u8 *row = bgimage_mem + (u64)y * mBytesPerLine;
++		u64 base = (u64)y * mWidth;
++		for (u32 x = 0; x < mWidth; x++) {
++			u32 a = oldImg[base + x], b = bgNext[base + x], o;
++			switch (bgTrans) {
++			case 2: // fade through black
++				o = t < 500 ? bgBlend(a, 0, t * 2) : bgBlend(0, b, t * 2 - 1000);
++				break;
++			case 3: // fade through white
++				o = t < 500 ? bgBlend(a, 0xffffff, t * 2) : bgBlend(0xffffff, b, t * 2 - 1000);
++				break;
++			case 1: // crossfade
++				o = bgBlend(a, b, t);
++				break;
++			default:
++				o = b;
++				break;
++			}
++			switch (mBitsPerPixel) {
++			case 32: ((u32 *)row)[x] = o; break;
++			case 16: ((u16 *)row)[x] = ((o >> 19) << 11) | (((o >> 8) & 0xfc) << 3) | ((o & 0xff) >> 3); break;
++			default: ((u16 *)row)[x] = ((o >> 19) << 10) | (((o >> 8) & 0xf8) << 2) | ((o & 0xff) >> 3); break;
++			}
++		}
++	}
++	(void)n;
++}
++
++bool Screen::bgLoad()
++{
++	FILE *f = fopen(bgPath, "rb");
++	if (!f) return false;
++
++	u32 head[5];
++	bool ok = fread(head, 4, 5, f) == 5 && head[0] == 0x31474246
++		&& head[1] == mWidth && head[2] == mHeight;
++	u32 *img = 0;
++	if (ok) {
++		img = new u32[(u64)mWidth * mHeight];
++		ok = fread(img, 4, (u64)mWidth * mHeight, f) == (u64)mWidth * mHeight;
++	}
++	fclose(f);
++	if (!ok) {
++		delete[] img;
++		return false;
++	}
++
++	delete[] bgNext;
++	bgNext = img;
++	bgTrans = head[3] <= 3 ? head[3] : 1;
++	bgDur = head[4] > 10000 ? 10000 : head[4];
++	if (!bgTrans) bgDur = 0;
++	return true;
++}
++
++bool Screen::pollBackground()
++{
++	if (!bgimage_mem || !bgPath) return false;
++
++	if (!bgAnim) {
++		struct stat st;
++		if (stat(bgPath, &st)) return false;
++		if (bgHasSeen && st.st_ino == bgSeenIno
++		    && st.st_mtim.tv_sec == bgSeen.tv_sec
++		    && st.st_mtim.tv_nsec == bgSeen.tv_nsec) return false;
++		bgSeen = st.st_mtim;
++		bgSeenIno = st.st_ino;
++		bgHasSeen = true;
++		if (!bgLoad()) return false;
++		bgAnim = true;
++		bgStart = bgNowMs();
++		if (!bgDur) { // instant change
++			bgWriteFrame(1000);
++			delete[] bgCur;
++			bgCur = bgNext;
++			bgNext = 0;
++			bgAnim = false;
++			return true;
++		}
++		return false;
++	}
++
++	u64 elapsed = bgNowMs() - bgStart;
++	u32 t = bgDur ? (u32)(elapsed * 1000 / bgDur) : 1000;
++	if (t >= 1000) {
++		bgWriteFrame(1000);
++		delete[] bgCur;
++		bgCur = bgNext;
++		bgNext = 0;
++		bgAnim = false;
++	} else {
++		bgWriteFrame(t);
++	}
++	return true;
++}
++
++u32 Screen::backgroundInterval()
++{
++	return bgAnim ? 30 : 500;
  }
  
 -void Screen::fillX(u32 x, u32 y, u32 w, u8 color)
@@ -2543,7 +2833,7 @@ diff -ruN '--exclude=Makefile.in' a/src/screen_render.cpp b/src/screen_render.cp
  {
  	u32 c = fillColors[color];
  	u8 *dst = mVMemBase + y * mBytesPerLine + x * bytes_per_pixel;
-@@ -129,17 +129,17 @@
+@@ -129,17 +325,17 @@
  	}
  }
  
@@ -2565,7 +2855,7 @@ diff -ruN '--exclude=Makefile.in' a/src/screen_render.cpp b/src/screen_render.cp
  {
  	bool isfg;
  	u8 *dst = mVMemBase + y * mBytesPerLine + x * bytes_per_pixel;
-@@ -150,10 +150,10 @@
+@@ -150,10 +346,10 @@
  	}
  }
  
@@ -2579,7 +2869,7 @@ diff -ruN '--exclude=Makefile.in' a/src/screen_render.cpp b/src/screen_render.cp
  		return;
  	}
  
-@@ -170,7 +170,7 @@
+@@ -170,7 +366,7 @@
  
  #define drawX(bits, lred, lgreen, lblue, type, fbwrite) \
   \
@@ -2588,7 +2878,7 @@ diff -ruN '--exclude=Makefile.in' a/src/screen_render.cpp b/src/screen_render.cp
  { \
  	u8 red, green, blue; \
  	u8 pixel; \
-@@ -199,10 +199,10 @@
+@@ -199,10 +395,10 @@
  
  #define drawXBg(bits, lred, lgreen, lblue, type, fbwrite) \
   \
