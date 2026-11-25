@@ -60,7 +60,7 @@ if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]
 fi
 [ -f "$SRC" ] || fail "image not found: $SRC"
 [ -r "$SRC" ] || fail "image is not readable: $SRC"
-[ -d "$DATA" ] || fail "$DATA does not exist. Run setup-fbterm-background.sh first."
+[ -d "$DATA" ] || fail "$DATA does not exist. Run install.sh first."
 
 # --- Get a PNG into a temp file -------------------------------------------
 TMP="$(mktemp --suffix=.png "$DATA/.wallpaper-new.XXXXXX")" || fail "could not create a temp file in $DATA"

@@ -20,7 +20,7 @@ set -u
 PATH="$PATH:/usr/local/sbin:/usr/sbin:/sbin"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-FONT_SRC="$SCRIPT_DIR/../wallpaper/Default8x16.bdf"
+FONT_SRC="$SCRIPT_DIR/../wallpaper/assets/Default8x16.bdf"
 [ -f "$FONT_SRC" ] || FONT_SRC="$SCRIPT_DIR/Default8x16.bdf"
 FONT_DST=/usr/share/fonts/Default8x16/Default8x16.bdf
 FONTCONFIG_RULE=/etc/fonts/conf.d/60-default8x16.conf

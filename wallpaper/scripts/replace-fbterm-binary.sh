@@ -9,15 +9,15 @@
 # Debian source plus fbterm-compat.patch (same recipe as the setup
 # script), then swaps it in. Or pass a binary you built yourself:
 #
-#   ./replace-fbterm-binary.sh              build and swap
-#   ./replace-fbterm-binary.sh ./fbterm     swap this binary in
-#   ./replace-fbterm-binary.sh --restore    put the backup back
-#   ./replace-fbterm-binary.sh --check      show what is installed
+#   ./scripts/replace-fbterm-binary.sh              build and swap
+#   ./scripts/replace-fbterm-binary.sh ./fbterm     swap this binary in
+#   ./scripts/replace-fbterm-binary.sh --restore    put the backup back
+#   ./scripts/replace-fbterm-binary.sh --check      show what is installed
 
 set -u
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-PATCH_FILE="$SCRIPT_DIR/fbterm-compat.patch"
+PATCH_FILE="$SCRIPT_DIR/../assets/fbterm-compat.patch"
 POOL_URL="https://deb.debian.org/debian/pool/main/f/fbterm"
 DEST="/usr/local/bin/fbterm-patched"
 FORCE=0
@@ -140,7 +140,7 @@ Install the build tools with:
   sudo apt-get install -y --no-install-recommends libgpm-dev"
     pkg-config --exists fontconfig || fail "fontconfig development files missing (libfontconfig1-dev)"
     pkg-config --exists freetype2 || fail "FreeType development files missing (libfreetype-dev)"
-    [ -f "$PATCH_FILE" ] || fail "fbterm-compat.patch not found next to this script"
+    [ -f "$PATCH_FILE" ] || fail "fbterm-compat.patch not found (expected: $PATCH_FILE)"
 
     local work
     work="$(mktemp -d /tmp/fbterm-build.XXXXXX)" || fail "mktemp failed"

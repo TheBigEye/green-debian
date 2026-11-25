@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup-fbterm-background.sh - wallpaper + classic 8x16 font + fastfetch
+# install.sh - wallpaper + classic 8x16 font + fastfetch
 # on Debian TTYs (FbTerm, no X11). English version.
 #
 # Phases, in order:
@@ -51,10 +51,12 @@ FISH_MARK_BEGIN='# >>> fbterm-background fish (TTY) >>>'
 FISH_MARK_END='# <<< fbterm-background fish (TTY) <<<'
 
 # Patched FbTerm (build phase) and terminfo phase.
-PATCH_FILE="$SCRIPT_DIR/fbterm-compat.patch"
+ASSETS_DIR="$SCRIPT_DIR/assets"
+SCRIPTS_DIR="$SCRIPT_DIR/scripts"
+PATCH_FILE="$ASSETS_DIR/fbterm-compat.patch"
 POOL_URL="https://deb.debian.org/debian/pool/main/f/fbterm"
 DEST_PATCHED="/usr/local/bin/fbterm-patched"
-TI_FILE="$SCRIPT_DIR/fbterm-256color.ti"
+TI_FILE="$ASSETS_DIR/fbterm-256color.ti"
 TERMINFO_DIR="$HOME/.terminfo"
 TERMINFO_COMPILED="$TERMINFO_DIR/f/fbterm-256color"
 TERMINFO_SYS_DIR="/etc/terminfo"
@@ -70,9 +72,9 @@ SEEN_FLAGS=""
 usage() {
     cat <<'EOF'
 Usage:
-  setup-fbterm-background.sh [--no-apt] [--allow-root] [--no-patched]
+  install.sh [--no-apt] [--allow-root] [--no-patched]
                              [--rebuild-idump]
-  setup-fbterm-background.sh --uninstall
+  install.sh --uninstall
 
 Options:
   --no-apt        Do not install APT packages; only warn about missing
@@ -511,7 +513,7 @@ terminfo_install() {
 
 rebuild_idump() (
     cd "$SCRIPT_DIR" || exit 1
-    TAR="$SCRIPT_DIR/idump-0.2.0.tar.gz"
+    TAR="$ASSETS_DIR/idump-0.2.0.tar.gz"
     [ -f "$TAR" ] || { echo "setup: missing $TAR" >&2; exit 1; }
     if ! command -v gcc >/dev/null 2>&1; then
         if [ "$USE_APT" -eq 1 ]; then
@@ -525,14 +527,14 @@ rebuild_idump() (
     trap 'rm -rf "$TMP"' EXIT
     tar -xzf "$TAR" -C "$TMP" || exit 1
     cd "$TMP/idump-0.2.0/static" || exit 1
-    gcc -static -Os -s -std=gnu99 -fgnu89-inline ../libnsgif.c ../libnsbmp.c ../lodepng.c idump.c -o "$SCRIPT_DIR/idump" || exit 1
-    chmod 0755 "$SCRIPT_DIR/idump"
-    echo "Rebuilt viewer: $SCRIPT_DIR/idump"
+    gcc -static -Os -s -std=gnu99 -fgnu89-inline ../libnsgif.c ../libnsbmp.c ../lodepng.c idump.c -o "$ASSETS_DIR/idump" || exit 1
+    chmod 0755 "$ASSETS_DIR/idump"
+    echo "Rebuilt viewer: $ASSETS_DIR/idump"
     # The slideshow renderer shares the PNG decoder with idump.
-    if [ -f "$SCRIPT_DIR/fbrender.c" ]; then
-        gcc -static -O2 -s -std=gnu99 -I.. "$SCRIPT_DIR/fbrender.c" ../lodepng.c -o "$SCRIPT_DIR/fbrender" || exit 1
-        chmod 0755 "$SCRIPT_DIR/fbrender"
-        echo "Rebuilt slideshow renderer: $SCRIPT_DIR/fbrender"
+    if [ -f "$ASSETS_DIR/fbrender.c" ]; then
+        gcc -static -O2 -s -std=gnu99 -I.. "$ASSETS_DIR/fbrender.c" ../lodepng.c -o "$ASSETS_DIR/fbrender" || exit 1
+        chmod 0755 "$ASSETS_DIR/fbrender"
+        echo "Rebuilt slideshow renderer: $ASSETS_DIR/fbrender"
     fi
 )
 
@@ -674,16 +676,16 @@ install_core() {
 [ -d "$SCRIPT_DIR/gallery" ] && ls "$SCRIPT_DIR/gallery"/*.png >/dev/null 2>&1 || {
     echo "Error: the gallery folder (with at least one PNG image) is" >&2
     echo "missing next to this script." >&2; exit 1; }
-if [ ! -f "$SCRIPT_DIR/idump" ] && command -v gcc >/dev/null 2>&1; then
+if [ ! -f "$ASSETS_DIR/idump" ] && command -v gcc >/dev/null 2>&1; then
     echo "The idump binary is missing next to this script; building it (needed once)..."
     rebuild_idump || true
 fi
-[ -f "$SCRIPT_DIR/idump" ] || {
-    echo "Error: the idump binary is missing next to this script." >&2
-    echo "If your architecture is not x86_64, build it first: ./setup-fbterm-background.sh --rebuild-idump" >&2
+[ -f "$ASSETS_DIR/idump" ] || {
+    echo "Error: the idump binary is missing in $ASSETS_DIR." >&2
+    echo "If your architecture is not x86_64, build it first: ./install.sh --rebuild-idump" >&2
     exit 1; }
-[ -f "$SCRIPT_DIR/Default8x16.bdf" ] || {
-    echo "Error: Default8x16.bdf is missing next to this script." >&2; exit 1; }
+[ -f "$ASSETS_DIR/Default8x16.bdf" ] || {
+    echo "Error: Default8x16.bdf is missing in $ASSETS_DIR." >&2; exit 1; }
 
 # --- Required packages (Debian trixie, no recommends) --------------------------
 PACKAGES=()
@@ -734,7 +736,7 @@ install -m 0644 "$FIRST_IMG" "$DEST_DATA/wallpaper.png"
 # The old pre-cropped 16:9 file is no longer used: idump now fits the
 # original image to the actual framebuffer at login.
 rm -f "$DEST_DATA/wallpaper-16x9.png"
-install -m 0644 "$SCRIPT_DIR/Default8x16.bdf" "$DEST_FONT_DIR/Default8x16.bdf"
+install -m 0644 "$ASSETS_DIR/Default8x16.bdf" "$DEST_FONT_DIR/Default8x16.bdf"
 cat > "$DEST_FONTCONFIG_FILE" <<EOF_FONTCONFIG
 <?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
@@ -788,40 +790,40 @@ case "$FONT_STATUS" in
         echo "rejection rules overriding $DEST_FONTCONFIG_FILE." >&2
         ;;
 esac
-install -m 0755 "$SCRIPT_DIR/idump" "$DEST_IDUMP"
+install -m 0755 "$ASSETS_DIR/idump" "$DEST_IDUMP"
 # Slideshow renderer and rotator. The renderer is used prebuilt
 # when it sits next to this script; it is built on the fly when
 # gcc is available. Without it the slideshow is unavailable, but
 # the static background keeps working.
-if [ -f "$SCRIPT_DIR/fbrender" ]; then
-    install -m 0755 "$SCRIPT_DIR/fbrender" "$DEST_RENDER"
-elif [ -f "$SCRIPT_DIR/fbrender.c" ] && [ -f "$SCRIPT_DIR/idump-0.2.0.tar.gz" ] \
+if [ -f "$ASSETS_DIR/fbrender" ]; then
+    install -m 0755 "$ASSETS_DIR/fbrender" "$DEST_RENDER"
+elif [ -f "$ASSETS_DIR/fbrender.c" ] && [ -f "$ASSETS_DIR/idump-0.2.0.tar.gz" ] \
      && command -v gcc >/dev/null 2>&1; then
     RENDER_TMP="$(mktemp -d)"
-    if tar -xzf "$SCRIPT_DIR/idump-0.2.0.tar.gz" -C "$RENDER_TMP" 2>/dev/null \
-       && gcc -O2 -s -std=gnu99 -I"$RENDER_TMP/idump-0.2.0" "$SCRIPT_DIR/fbrender.c" "$RENDER_TMP/idump-0.2.0/lodepng.c" -o "$DEST_RENDER" 2>/dev/null; then
+    if tar -xzf "$ASSETS_DIR/idump-0.2.0.tar.gz" -C "$RENDER_TMP" 2>/dev/null \
+       && gcc -O2 -s -std=gnu99 -I"$RENDER_TMP/idump-0.2.0" "$ASSETS_DIR/fbrender.c" "$RENDER_TMP/idump-0.2.0/lodepng.c" -o "$DEST_RENDER" 2>/dev/null; then
         chmod 0755 "$DEST_RENDER"
         echo "Built slideshow renderer on the fly: $DEST_RENDER"
     else
         echo "Warning: could not build the slideshow renderer (fbrender)." >&2
         echo "The slideshow will be unavailable. To enable it later:" >&2
-        echo "  ./setup-fbterm-background.sh --rebuild-idump" >&2
+        echo "  ./install.sh --rebuild-idump" >&2
     fi
     rm -rf "$RENDER_TMP"
 else
     echo "Warning: no slideshow renderer available (fbrender)." >&2
     echo "The slideshow will be unavailable. To enable it later:" >&2
-    echo "  ./setup-fbterm-background.sh --rebuild-idump" >&2
+    echo "  ./install.sh --rebuild-idump" >&2
 fi
-if [ -f "$SCRIPT_DIR/fbterm-slideshow.sh" ]; then
-    install -m 0755 "$SCRIPT_DIR/fbterm-slideshow.sh" "$DEST_SLIDESHOW"
+if [ -f "$SCRIPTS_DIR/fbterm-slideshow.sh" ]; then
+    install -m 0755 "$SCRIPTS_DIR/fbterm-slideshow.sh" "$DEST_SLIDESHOW"
 else
-    echo "Warning: fbterm-slideshow.sh is missing next to this script;" >&2
+    echo "Warning: fbterm-slideshow.sh is missing in $SCRIPTS_DIR;" >&2
     echo "the slideshow will be unavailable." >&2
 fi
 # Transparency: the viewer's source code is installed too.
-if [ -f "$SCRIPT_DIR/idump-0.2.0.tar.gz" ]; then
-    install -m 0644 "$SCRIPT_DIR/idump-0.2.0.tar.gz" "$DEST_DATA/"
+if [ -f "$ASSETS_DIR/idump-0.2.0.tar.gz" ]; then
+    install -m 0644 "$ASSETS_DIR/idump-0.2.0.tar.gz" "$DEST_DATA/"
 fi
 # Drop stale caches from previous versions.
 rm -rf "$HOME/.cache/fbterm-background" "$HOME/.cache/fbterm-fondo"
@@ -832,7 +834,7 @@ if ! "$DEST_IDUMP" -h >/dev/null 2>&1; then
     echo "Warning: the included idump binary does not run on this machine" >&2
     echo "(architecture other than x86_64?). Rebuild it with:" >&2
     echo "  sudo apt-get install -y --no-install-recommends gcc libc6-dev" >&2
-    echo "  ./setup-fbterm-background.sh --rebuild-idump" >&2
+    echo "  ./install.sh --rebuild-idump" >&2
 fi
 
 # Persistent settings: created once, NEVER overwritten on reinstall,
@@ -1254,7 +1256,7 @@ if [ -z "${FBTERM_BACKGROUND_ACTIVE:-}" ]; then
 elif [ -z "${FBTERM_FASTFETCH_DONE:-}" ]; then
     export FBTERM_FASTFETCH_DONE=1
     # Prefer the 256-color terminfo name when it has been compiled
-    # (./setup-fbterm-background.sh); stock "fbterm" otherwise. Both
+    # (./install.sh); stock "fbterm" otherwise. Both
     # describe the same entry: FbTerm renders 256 colors through its
     # private sequences (ESC [ 1;n } / ESC [ 2;n }), which the
     # terminfo setaf/setab already use.
@@ -1335,7 +1337,7 @@ if not set -q FBTERM_BACKGROUND_ACTIVE
 else if not set -q FBTERM_FASTFETCH_DONE
     set -gx FBTERM_FASTFETCH_DONE 1
     # Prefer the 256-color terminfo name when it has been compiled
-    # (./setup-fbterm-background.sh); stock "fbterm" otherwise.
+    # (./install.sh); stock "fbterm" otherwise.
     if test "$TERM" = linux
         if infocmp fbterm-256color >/dev/null 2>&1
             set -gx TERM fbterm-256color
@@ -1476,6 +1478,6 @@ Notes:
     folder to extend the rotation.
   - Disable without uninstalling: touch ~/.config/fbterm-background/disabled
   - One-off without background: fbterm-background --no-background
-  - Everything is re-runnable: ./setup-fbterm-background.sh
-  - Remove everything:   ./setup-fbterm-background.sh --uninstall
+  - Everything is re-runnable: ./install.sh
+  - Remove everything:   ./install.sh --uninstall
 EOF

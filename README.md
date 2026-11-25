@@ -377,7 +377,7 @@ You need the installed Debian system (for example, one made by
 
 ```sh
 cd wallpaper
-./setup-fbterm-background.sh
+./install.sh
 ```
 
 The script installs the needed packages, builds the patched FbTerm (see
@@ -388,7 +388,7 @@ when you log in on a TTY.
 To remove everything again:
 
 ```sh
-./setup-fbterm-background.sh --uninstall
+./install.sh --uninstall
 ```
 
 Other flags:
@@ -409,7 +409,7 @@ build is skipped. After you change the patch, force a rebuild like this:
 
 ```sh
 sudo rm /usr/local/bin/fbterm-patched
-./setup-fbterm-background.sh
+./install.sh
 ```
 
 ### Mouse inside FbTerm
@@ -468,10 +468,10 @@ Notes:
 
 - The slideshow needs the patched FbTerm and the `fbrender`
   helper. On an existing install, update both with
-  `./replace-fbterm-binary.sh` (new binary) and a normal run of
-  `./setup-fbterm-background.sh` (renderer, rotator, launcher).
+  `./scripts/replace-fbterm-binary.sh` (new binary) and a normal run of
+  `./install.sh` (renderer, rotator, launcher).
   If `fbrender` is ever missing, build it together with the
-  viewer: `./setup-fbterm-background.sh --rebuild-idump`.
+  viewer: `./install.sh --rebuild-idump`.
 - To jump to the next image right away, run
   `touch ~/.local/share/fbterm-background/slideshow.next`.
 - The slideshow pauses on its own when you switch to another
@@ -479,9 +479,9 @@ Notes:
   is already the current image when the screen is redrawn).
 
 ```sh
-./replace-fbterm-binary.sh          # build and swap the binary
-./replace-fbterm-binary.sh --check  # show what is installed now
-./replace-fbterm-binary.sh --restore  # put the previous binary back
+./scripts/replace-fbterm-binary.sh          # build and swap the binary
+./scripts/replace-fbterm-binary.sh --check  # show what is installed now
+./scripts/replace-fbterm-binary.sh --restore  # put the previous binary back
 ```
 
 The old binary is kept as `/usr/local/bin/fbterm-patched.bak`.
@@ -491,7 +491,7 @@ The old binary is kept as `/usr/local/bin/fbterm-patched.bak`.
 Once the setup is installed, use `set-fbterm-wallpaper.sh`:
 
 ```sh
-./set-fbterm-wallpaper.sh ~/Pictures/my-image.jpg
+./scripts/set-fbterm-wallpaper.sh ~/Pictures/my-image.jpg
 ```
 
 Step by step, this is what it does:
@@ -513,7 +513,7 @@ Step by step, this is what it does:
 To change and restart in one step, without being asked:
 
 ```sh
-./set-fbterm-wallpaper.sh ~/Pictures/my-image.jpg --restart
+./scripts/set-fbterm-wallpaper.sh ~/Pictures/my-image.jpg --restart
 ```
 
 If you answer no at the question, nothing bad happens. The new image
@@ -534,7 +534,7 @@ classic example is dark blue text, like the `UUID=` lines when you edit
 
    ```sh
    sudo rm /usr/local/bin/fbterm-patched
-   ./setup-fbterm-background.sh
+   ./install.sh
    ```
 
 2. **The background image can be darkened.** Edit
@@ -552,16 +552,16 @@ inside vim (put `colorscheme habamax` in `~/.vimrc` to keep it).
 
 | File | Purpose |
 | --- | --- |
-| `setup-fbterm-background.sh` | The installer and uninstaller. Runs in phases and verifies itself. |
-| `set-fbterm-wallpaper.sh` | Changes the installed background image. See "Changing the wallpaper" above. |
-| `gallery/` | The wallpaper images. The setup copies them to `~/.local/share/fbterm-background/gallery`, and the slideshow rotates through them. |
-| `fbterm-slideshow.sh` | The slideshow rotator. Installed as `~/.local/bin/fbterm-slideshow` and started by the login launcher. |
-| `fbrender.c` | Source of the slideshow renderer (built into `~/.local/bin/fbrender`): turns a PNG into the raw background file the patched FbTerm fades to. |
-| `idump` | The framebuffer image viewer, a small static binary. |
-| `idump-0.2.0.tar.gz` and `idump.sha256` | The viewer source and its checksum. Used by `--rebuild-idump`, or if the binary is missing from a fresh clone. |
-| `Default8x16.bdf` | The classic 8x16 console font, registered through fontconfig. |
-| `fbterm-256color.ti` | The terminfo entry for the patched terminal: 256 colours, and `U8#1` so ncurses draws box borders correctly under UTF-8 locales. |
-| `fbterm-compat.patch` | The patch against the Debian `fbterm 1.7-5` sources. The script downloads those sources, checks them against the Debian checksums, applies this patch, and builds `/usr/local/bin/fbterm-patched`. |
+| `install.sh` | The installer and uninstaller. Runs in phases and verifies itself. |
+| `gallery/` | The wallpaper images. The installer copies them to `~/.local/share/fbterm-background/gallery`, and the slideshow rotates through them. |
+| `scripts/set-fbterm-wallpaper.sh` | Changes the installed background image. See "Changing the wallpaper" above. |
+| `scripts/replace-fbterm-binary.sh` | Rebuilds and swaps only the patched FbTerm binary. See "Mouse inside FbTerm" above. |
+| `scripts/fbterm-slideshow.sh` | The slideshow rotator. Installed as `~/.local/bin/fbterm-slideshow` and started by the login launcher. |
+| `assets/fbterm-compat.patch` | The patch against the Debian `fbterm 1.7-5` sources. The installer downloads those sources, checks them against the Debian checksums, applies this patch, and builds `/usr/local/bin/fbterm-patched`. |
+| `assets/fbrender.c` | Source of the slideshow renderer (built into `~/.local/bin/fbrender`): turns a PNG into the raw background file the patched FbTerm fades to. |
+| `assets/idump-0.2.0.tar.gz` and `assets/idump.sha256` | The framebuffer viewer source and its checksum. `--rebuild-idump` builds the `idump` viewer and `fbrender` from it into `assets/`; a fresh clone has no binaries yet, and the installer builds them on its own when gcc is present. |
+| `assets/Default8x16.bdf` | The classic 8x16 console font, registered through fontconfig. |
+| `assets/fbterm-256color.ti` | The terminfo entry for the patched terminal: 256 colours, and `U8#1` so ncurses draws box borders correctly under UTF-8 locales. |
 
 ### What the patched FbTerm changes
 
