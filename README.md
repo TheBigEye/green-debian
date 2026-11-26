@@ -1,13 +1,21 @@
 # green-debian
 
-This repository holds my personal Debian 13 "trixie" setup. It has three
-independent parts. You can use any of them on its own.
+This repository holds my personal Debian 13 "trixie" setup. Each part
+works on its own.
 
 | Path | What it is |
 | --- | --- |
 | `install.sh` | An interactive installer that builds a complete Debian system from a Debian Live session. It does not use the traditional Debian installer. |
 | `tux-boot/` | A Plymouth boot splash theme. |
 | `wallpaper/` | A background image for the text console (TTY), shown through FbTerm. No X11 is involved. |
+| `fastfetch/` | A fastfetch config and text logos. |
+| `randfetch/` | Makes fastfetch pick a random logo on every run. Has its own README. |
+
+The idea behind the whole repo: one USB stick with a full, encrypted
+Debian on it, which boots on whatever PC is nearby. At boot you get a
+penguin splash screen, and at login you get a text console with a
+wallpaper and a slow slideshow behind it, no desktop needed. It is a
+console setup that tries to look good anyway.
 
 Everything here is made for my own machine and my own VM. Please read the
 scripts before you run them on hardware you care about.
@@ -31,7 +39,7 @@ itself, step by step:
 5. It installs packages, configures the system, and sets up the Limine
    bootloader for both UEFI and BIOS boot.
 
-The scenario it is written for is very specific:
+It is written for one specific setup:
 
 - You boot `debian-live-13.7.0-amd64-standard.iso` in a VM or on a real PC.
 - The machine has one single disk: a USB stick that shows up as `/dev/sda`.
@@ -40,6 +48,17 @@ The scenario it is written for is very specific:
 
 The target is fixed to `/dev/sda` on purpose. It cannot be changed in a
 question. This removes a whole class of "wrong disk" accidents.
+
+### Why install it this way
+
+The normal Debian installer targets internal disks and hides most of
+what it does. Doing the job in a script means knowing exactly what
+lands on the stick: the partitions, the encryption, the package list,
+the bootloader. Nothing happens behind a wizard.
+
+It is also a good way to learn what an installation really is. Stage
+by stage this does by hand what installer programs do quietly, and
+each stage can be read in the script before it runs.
 
 ### Before you start
 
@@ -192,7 +211,7 @@ opens the stick from a Live session, fixes the paths and reinstalls the
 hook. On a system installed with version 2.1.0 or later, you should not
 need it as a routine.
 
-### The main choices, in plain words
+### The main choices
 
 **Greeter (how you log in).**
 
@@ -232,7 +251,7 @@ gets you a warning, never a block. The decision is yours, but a short
 LUKS passphrase is much easier to brute-force.
 
 **Passwords are printable ASCII only.** The accepted range is 0x21 to
-0x7E: letters, numbers and symbols. No spaces, no accents, no "n". This is
+0x7E: letters, numbers and symbols. No spaces, no accents, no "ñ". This is
 not arbitrary. The initramfs asks for the LUKS passphrase before the full
 keyboard layout is loaded. A passphrase with accents that you typed
 without trouble in the Live session can be impossible to type at boot,
@@ -302,7 +321,7 @@ apply `none`, `full`, `minimal`, `both`, `conservative`, `aggressive`,
 > versions will be rejected by the validation. Answer the questions once
 > to generate a new one.
 
-### How it works, and the honest limits
+### How it works, and the limits
 
 - Everything temporary lives in `/tmp`. On Debian 13, `/tmp` is tmpfs,
   which is RAM. The log, the stage state, the backups, the downloaded
@@ -310,7 +329,7 @@ apply `none`, `full`, `minimal`, `both`, `conservative`, `aggressive`,
   keys all live there.
 - Because of that, the installed system contains no trace of the
   installer. The script does not even copy itself into the new system.
-- The other side of the coin: if you power off or reboot the Live
+- The downside: if you power off or reboot the Live
   session, all of it is gone, including `--resume` state and the LUKS
   header backup. If you want to keep the header backup, copy
   `artifacts/luks-header.img` to another machine before you shut down.
@@ -332,28 +351,31 @@ apply `none`, `full`, `minimal`, `both`, `conservative`, `aggressive`,
 `tux-boot/` is a Plymouth theme. Plymouth is the program that shows the
 graphical splash and the disk password prompt while the system boots.
 
-The theme uses the standard `two-step` module:
+The theme uses the standard `two-step` module: a black background, an
+animated Tux logo, a thin progress bar, and the usual password dialog
+images for the LUKS prompt. The animation has 81 frames and the
+progress bar 51, which is a lot of pictures of a penguin, but the
+result is smooth.
 
-- black background
-- an animated Tux logo, in the style of the macOS boot animation
-  (the frames are `animation-00.png` and up)
-- a thin progress bar (the frames are `progress-00.png` and up)
-- the standard password dialog images used at the LUKS prompt: text
-  entry, password bullets, caps lock and keyboard layout icons
-
-To install it on a system that already runs Debian:
+The theme asks for the classic 8x16 console font (Default8x16), which
+Plymouth does not know by default, so install it with the included
+script instead of copying files by hand. It installs the theme, the
+font, and an initramfs hook that makes Plymouth find the font at boot:
 
 ```sh
-sudo cp -r tux-boot /usr/share/plymouth/themes/
-sudo plymouth-set-default-theme -R tux-boot
+cd tux-boot
+sudo ./setup-tux-boot.sh
 ```
 
-The name inside `linux-mac-style.plymouth` is `tux-boot`, and the folder
-name matches it, which is what Plymouth expects.
+Rerunning it is safe. The theme file is `tux-boot.plymouth`; its name
+and the folder name match, which is what Plymouth expects. The theme
+also sets `SuppressMessages=true`, so the boot log line "cryptsetup:
+cryptroot: set up successfully" does not show over the splash. The
+LUKS password prompt still shows as usual.
 
-Note: `install.sh` can enable Plymouth during installation, but it only
-offers the themes that Debian itself ships (default `spinfinity`). This
-custom theme is copied in by hand afterwards with the two commands above.
+Note: `install.sh` can enable Plymouth during installation, but it
+only offers the themes Debian ships (default `spinfinity`). Install
+this theme afterwards with the script above.
 
 ---
 
@@ -395,6 +417,7 @@ Other flags:
 
 | Flag | What it does |
 | --- | --- |
+| `--no-apt` | Do not install APT packages; only warn about missing ones. |
 | `--no-patched` | Use the stock Debian FbTerm instead of building the patched one. |
 | `--rebuild-idump` | Rebuild the bundled `idump` viewer and the `fbrender` slideshow renderer from source. |
 | `--allow-root` | Allow running as root (it normally refuses). |
@@ -412,6 +435,35 @@ sudo rm /usr/local/bin/fbterm-patched
 ./install.sh
 ```
 
+### Why FbTerm
+
+FbTerm 1.7 is from 2010 and upstream has been quiet since. It is
+still the only tool that does this job well: a real terminal on the
+framebuffer, over a background image, with no X11 in between. So
+instead of replacing it, this repo patches it. The patch in
+`assets/fbterm-compat.patch` is the maintenance upstream never did,
+and the sections below describe what it changes. Stock FbTerm from
+Debian works too, just with fewer features.
+
+### Three bugs that cost an afternoon each
+
+- **The black square.** The kernel console kept drawing its block
+  cursor while the wallpaper was painted. FbTerm photographed the
+  framebuffer a moment later, cursor included, and the square became
+  part of the wallpaper forever. The fix is boring: hide the cursor
+  before painting, show it again when FbTerm exits.
+- **The mouse trail.** Move the mouse at the login prompt while the
+  wallpaper is being painted, and early versions kept a trail of
+  black cells across the picture. The mouse server was drawing its
+  own pointer over the image, and FbTerm captured that too. Now
+  FbTerm takes the mouse before it captures the screen, and the
+  launcher holds a helper client while painting.
+- **The vanishing mouse.** Restart the `gpm` service while FbTerm
+  was running, and the old FbTerm never reconnected. The mouse
+  server went back to drawing its pointer over the terminal picture,
+  erasing text as it moved. The patched FbTerm now keeps retrying
+  until the mouse server returns, then repaints.
+
 ### Mouse inside FbTerm
 
 The mouse inside FbTerm goes through GPM, the same mouse server that
@@ -422,13 +474,12 @@ draws the pointer on the login console. Two things are needed:
 2. A patched FbTerm that was built with `libgpm-dev` installed.
    Without that header, FbTerm's build quietly skips the mouse code
    and no mouse ever works inside it. This was the case in older
-   builds. The setup script now installs `libgpm-dev`, refuses to
+   builds. The installer now installs `libgpm-dev`, refuses to
    build without the mouse, and rebuilds an old mouse-less binary
    on its own when you run it again.
 
-One thing that surprises people: there is no arrow pointer inside
-FbTerm. FbTerm never draws one, and GPM's own pointer belongs to the
-text console. The mouse still works. You see it as text selection
+There is no arrow pointer inside FbTerm. FbTerm never draws
+one, and GPM's own pointer belongs to the text console. The mouse still works. You see it as text selection
 when you drag over text, and programs that use the mouse (vim with
 `set mouse=a`, Midnight Commander, tmux) receive clicks, drags and
 the wheel. The patched FbTerm also understands the current mouse
@@ -438,12 +489,23 @@ recent vim, Neovim and tmux versions expect.
 If you only want the new binary, without running the whole setup
 again and without touching your `~/.fbtermrc`, use:
 
+```sh
+./scripts/replace-fbterm-binary.sh          # build and swap the binary
+./scripts/replace-fbterm-binary.sh --check  # show what is installed now
+./scripts/replace-fbterm-binary.sh --restore  # put the previous binary back
+```
+
+The old binary is kept as `/usr/local/bin/fbterm-patched.bak`.
+
 ### Background slideshow
 
-While FbTerm runs, the background rotates through the gallery:
-the PNG images in `~/.local/share/fbterm-background/gallery`
-(the setup copies the repo's `gallery/` folder there; drop more
-PNGs into it whenever you like). Every 60 seconds the next image
+While FbTerm runs, the background rotates through the gallery.
+With the two included images it is a postcard that changes once a
+minute; fill the folder with screenshots and it becomes a slow
+slideshow behind your work. The images are the PNG files in
+`~/.local/share/fbterm-background/gallery`
+(the installer copies the repo's `gallery/` folder there; drop
+more PNGs into it whenever you like). Every 60 seconds the next image
 fades in. Only the background changes. The text on your terminal,
 your cursor and your programs are never touched, because the
 patched FbTerm blends the two backgrounds underneath the text it
@@ -478,14 +540,6 @@ Notes:
   virtual console and resumes when you come back (the background
   is already the current image when the screen is redrawn).
 
-```sh
-./scripts/replace-fbterm-binary.sh          # build and swap the binary
-./scripts/replace-fbterm-binary.sh --check  # show what is installed now
-./scripts/replace-fbterm-binary.sh --restore  # put the previous binary back
-```
-
-The old binary is kept as `/usr/local/bin/fbterm-patched.bak`.
-
 ### Changing the wallpaper
 
 Once the setup is installed, use `set-fbterm-wallpaper.sh`:
@@ -516,8 +570,8 @@ To change and restart in one step, without being asked:
 ./scripts/set-fbterm-wallpaper.sh ~/Pictures/my-image.jpg --restart
 ```
 
-If you answer no at the question, nothing bad happens. The new image
-simply shows the next time FbTerm starts.
+If you answer no, nothing happens. The new image shows the next
+time FbTerm starts.
 
 ### If some colours are hard to read
 
@@ -530,12 +584,8 @@ classic example is dark blue text, like the `UUID=` lines when you edit
    VGA values. Dark blue, dark red and the grey used for comments are
    the ones that change the most. This helps in every program, not
    just vim, because the fix is in the terminal itself. The 256-colour
-   range is not changed. To get it, rebuild the patched FbTerm:
-
-   ```sh
-   sudo rm /usr/local/bin/fbterm-patched
-   ./install.sh
-   ```
+   range is not changed. To get it, force a rebuild of the patched
+   FbTerm (the two commands under "How to install it" above).
 
 2. **The background image can be darkened.** Edit
    `~/.config/fbterm-background/config` and lower `FBTERM_BRIGHTNESS`.
@@ -583,18 +633,22 @@ programs expect. The patch adds them:
 - **Fish support.** The session is started correctly from both Bash and
   Fish, with your real shell (`$SHELL`) inside FbTerm, and fastfetch runs
   once at login.
+- **Bracketed paste, focus events, synchronized updates.** Programs
+  that ask for them (vim, fish, nano, tmux) get paste markers around
+  pasted text, focus in/out events, and whole frames shown at once
+  instead of half-drawn screens (modes 2004, 1004 and 2026).
+- **OSC 52.** When a program sets the "clipboard" (vim, tmux), it now
+  sets FbTerm's own selection instead of being ignored. Middle-click
+  pastes that text.
 - **The kitty keyboard protocol.** This is what makes fish 4 fully work.
-  When a program asks for it, the terminal reports keys in the modern
-  format: Ctrl+I is no longer the same key as Tab, Shift+Enter is no
-  longer the same as Enter, and key releases can be reported too. To do
-  this, the console is switched to medium-raw mode only while such a
-  program runs, and the keys are translated in userspace using your real
-  kernel keymap. That means your console layout and your dead keys (for
-  example the Spanish tilde key) keep working exactly as before. Programs
-  that never ask for the protocol, like bash, vim and ncurses programs,
-  get the old behaviour, byte for byte. The Caps Lock and Num Lock LEDs
-  are kept in sync as well.
-
+  When a program asks for it, keys are reported in the modern format:
+  Ctrl+I is no longer the same key as Tab, Shift+Enter is no longer
+  the same as Enter, and key releases can be reported too. The console
+  switches to medium-raw mode only while such a program runs, and
+  keys are translated using your real kernel keymap, so your layout
+  and dead keys (for example the Spanish tilde key) keep working.
+  Programs that never ask, like bash and vim, get the old behaviour
+  byte for byte.
 - **Alt+keypad composition keeps working.** Hold Alt, type a decimal
   code on the numeric keypad (for example Alt+227 for "ã"), release Alt,
   and the character is inserted. That is the classic console behaviour,
@@ -603,8 +657,25 @@ programs expect. The patch adds them:
   hexadecimal code instead. In plain mode it was never broken: there
   the kernel handles it, as always.
 
-One small limit of the kitty support, for honesty: while it is active,
-braille keys are not reproduced. They are rare on a normal console.
+One limit of the kitty support: while it is active, braille keys are
+not reproduced. They are rare on a normal console.
+
+---
+
+## Part 4: fastfetch and randfetch
+
+`fastfetch/` holds a fastfetch config (`config.jsonc`) and the text
+logos it can show. To use it, copy the `.txt` files and the config
+into `~/.config/fastfetch/`.
+
+`randfetch/` goes one step further: every fastfetch run shows a
+random logo from `~/.config/fastfetch/`. It works with Bash and Fish
+and needs nothing beyond fastfetch itself. Install it with
+`randfetch/install.sh`; its own README explains the details.
+
+The logos are plain text files with ANSI colour codes inside. Open
+one in a text editor and it looks like line noise. In the terminal
+it is a carrot.
 
 ---
 
@@ -613,13 +684,14 @@ braille keys are not reproduced. They are rare on a normal console.
 ```
 .
 ├── install.sh      # the Debian installer, run from a Live session
-├── tux-boot/       # Plymouth theme, copy to /usr/share/plymouth/themes/
-└── wallpaper/      # TTY wallpaper and patched FbTerm setup
+├── tux-boot/       # Plymouth theme and its installer
+├── wallpaper/      # TTY wallpaper and patched FbTerm setup
+├── fastfetch/      # fastfetch config and text logos
+└── randfetch/      # random fastfetch logo on every run
 ```
 
 ## Disclaimer
 
-This is a personal setup. It is shared in case it is useful to someone
-else, not as a finished product. The installer erases `/dev/sda` by
-design. Test it in a VM first, and never run it near a disk that holds
-data you want to keep.
+This is a personal setup, shared as is. The installer erases
+`/dev/sda` by design. Test it in a VM first. If something here saves
+you an afternoon, it did its job.
